@@ -1,15 +1,13 @@
 #!/usr/bin/env python
 from __future__ import division
-import os
 import sys
 import time
 import logging
-import tempfile
 import argparse
 import subprocess
 import collections
 import multiprocessing
-import distutils.spawn
+import mafft.disttbfast
 import seqtools
 import shims
 # There can be problems with the submodules, but none are essential.
@@ -24,7 +22,6 @@ phone = shims.get_module_or_shim('ET.phone')
 #      to make, but it's not obvious that it happened. The pipeline won't fail, but will just
 #      produce pretty weird results.
 
-REQUIRED_COMMANDS = ['mafft']
 OPT_DEFAULTS = {'processes':1, 'log_file':sys.stderr, 'volume':logging.WARNING}
 DESCRIPTION = """Read in sorted FASTQ data and do multiple sequence alignments of each family."""
 
@@ -82,14 +79,6 @@ def main(argv):
                               test=args.test, fail='warn')
 
   assert args.processes > 0, '-p must be greater than zero'
-
-  # Check for required commands.
-  missing_commands = []
-  for command in REQUIRED_COMMANDS:
-    if not distutils.spawn.find_executable(command):
-      missing_commands.append(command)
-  if missing_commands:
-    fail('Error: Missing commands: "'+'", "'.join(missing_commands)+'".')
 
   if args.infile:
     infile = open(args.infile)
@@ -312,52 +301,15 @@ def make_msa(family, mate):
   elif len(family) == 1:
     # If there's only one read pair, there's no alignment to be done (and MAFFT won't accept it).
     return [{'name':family[0]['name'+mate], 'seq':family[0]['seq'+mate]}]
-  #TODO: Replace with tempfile.mkstemp()?
-  with tempfile.NamedTemporaryFile('w', delete=False, prefix='align.msa.') as family_file:
-    for pair in family:
-      name = pair['name'+mate]
-      seq = pair['seq'+mate]
-      family_file.write('>'+name+'\n')
-      family_file.write(seq+'\n')
-  with open(os.devnull, 'w') as devnull:
-    try:
-      command = ['mafft', '--nuc', '--quiet', family_file.name]
-      output = subprocess.check_output(command, stderr=devnull)
-    except (OSError, subprocess.CalledProcessError):
-      raise
-    finally:
-      # Make sure we delete the temporary file.
-      os.remove(family_file.name)
-  return read_fasta(output, is_file=False, upper=True)
-
-
-def read_fasta(fasta, is_file=True, upper=False):
-  """Quick and dirty FASTA parser. Return the sequences and their names.
-  Returns a list of sequences. Each is a dict of 'name' and 'seq'.
-  Warning: Reads the entire contents of the file into memory at once."""
-  sequences = []
-  sequence = ''
-  seq_name = None
-  if is_file:
-    with open(fasta) as fasta_file:
-      fasta_lines = fasta_file.readlines()
-  else:
-    fasta_lines = fasta.splitlines()
-  for line in fasta_lines:
-    if line.startswith('>'):
-      if upper:
-        sequence = sequence.upper()
-      if sequence:
-        sequences.append({'name':seq_name, 'seq':sequence})
-      sequence = ''
-      seq_name = line.rstrip('\r\n')[1:]
-      continue
-    sequence += line.strip()
-  if upper:
-    sequence = sequence.upper()
-  if sequence:
-    sequences.append({'name':seq_name, 'seq':sequence})
-  return sequences
+  names = []
+  seqs = []
+  for pair in family:
+    names.append(pair['name'+mate])
+    seqs.append(pair['seq'+mate])
+  alignment = []
+  for seq, name in zip(mafft.disttbfast.align(seqs, names), names):
+    alignment.append({'seq':seq.upper(), 'name':name})
+  return alignment
 
 
 def format_msa(align, barcode, order, mate, outfile=sys.stdout):
