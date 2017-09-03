@@ -4,3 +4,6 @@
 [submodule "ET"]
 	path = ET
 	url = https://github.com/NickSto/ET.git
+[submodule "mafft"]
+	path = mafft
+	url = https://github.com/makrutenko/mafft-dunovo.git
