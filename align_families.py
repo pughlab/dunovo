@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 from __future__ import division
+import os
 import sys
 import time
 import logging
+import tempfile
 import argparse
 import subprocess
 import collections
 import multiprocessing
+import distutils.spawn
 import mafft.disttbfast
 import seqtools
 import shims
@@ -22,9 +25,12 @@ phone = shims.get_module_or_shim('ET.phone')
 #      to make, but it's not obvious that it happened. The pipeline won't fail, but will just
 #      produce pretty weird results.
 
+METHOD = os.environ.get('METHOD', 'exe')
+MAFFT = os.environ.get('MAFFT', 'mafft')
+
+REQUIRED_COMMANDS = [MAFFT]
 OPT_DEFAULTS = {'processes':1, 'log_file':sys.stderr, 'volume':logging.WARNING}
 DESCRIPTION = """Read in sorted FASTQ data and do multiple sequence alignments of each family."""
-
 
 def main(argv):
 
@@ -79,6 +85,14 @@ def main(argv):
                               test=args.test, fail='warn')
 
   assert args.processes > 0, '-p must be greater than zero'
+
+  # Check for required commands.
+  missing_commands = []
+  for command in REQUIRED_COMMANDS:
+    if not distutils.spawn.find_executable(command):
+      missing_commands.append(command)
+  if missing_commands:
+    fail('Error: Missing commands: "'+'", "'.join(missing_commands)+'".')
 
   if args.infile:
     infile = open(args.infile)
@@ -228,7 +242,7 @@ def delegate(workers, stats, duplex, barcode):
 
 def process_duplex(duplex, barcode):
   output = ''
-  run_stats = {'time':0, 'runs':0, 'aligned_pairs':0}
+  run_stats = {'time':0, 'runs':0, 'aligned_pairs':0, 'failures':0}
   orders = duplex.keys()
   if len(duplex) == 0 or None in duplex:
     return '', {}
@@ -244,6 +258,7 @@ def process_duplex(duplex, barcode):
   for mate, order in combos:
     family = duplex[order]
     start = time.time()
+    logging.debug('Aligning {}:{}:{}'.format(barcode, order, mate))
     try:
       alignment = align_family(family, mate)
     except AssertionError as error:
@@ -274,10 +289,16 @@ def align_family(family, mate):
   """Do a multiple sequence alignment of the reads in a family and their quality scores."""
   mate = str(mate)
   assert mate == '1' or mate == '2'
-  # Do the multiple sequence alignment.
-  seq_alignment = make_msa(family, mate)
-  if seq_alignment is None:
+  if len(family) == 0:
     return None
+  elif len(family) == 1:
+    # If there's only one read pair, there's no alignment to be done (and MAFFT won't accept it).
+    seq_alignment = [{'name':family[0]['name'+mate], 'seq':family[0]['seq'+mate]}]
+  else:
+    # Do the multiple sequence alignment.
+    seq_alignment = make_msa(family, mate, method=METHOD)
+    if seq_alignment is None:
+      return None
   # Transfer the alignment to the quality scores.
   ## Get a list of all sequences in the alignment (mafft output).
   seqs = [read['seq'] for read in seq_alignment]
@@ -291,16 +312,16 @@ def align_family(family, mate):
   return alignment
 
 
-def make_msa(family, mate):
-  """Perform a multiple sequence alignment on a set of sequences and parse the result.
+def make_msa(family, mate, method='exe'):
+  if method == 'exe':
+    return make_msa_exe(family, mate)
+  elif method == 'lib':
+    return make_msa_lib(family, mate)
+
+
+def make_msa_lib(family, mate):
+  """Perform a multiple sequence alignment on a set of sequences.
   Uses MAFFT."""
-  mate = str(mate)
-  assert mate == '1' or mate == '2'
-  if len(family) == 0:
-    return None
-  elif len(family) == 1:
-    # If there's only one read pair, there's no alignment to be done (and MAFFT won't accept it).
-    return [{'name':family[0]['name'+mate], 'seq':family[0]['seq'+mate]}]
   names = []
   seqs = []
   for pair in family:
@@ -310,6 +331,61 @@ def make_msa(family, mate):
   for seq, name in zip(mafft.disttbfast.align(seqs, names), names):
     alignment.append({'seq':seq.upper(), 'name':name})
   return alignment
+
+
+def make_msa_exe(family, mate):
+  """Perform a multiple sequence alignment on a set of sequences and parse the result.
+  Uses MAFFT."""
+  #TODO: Replace with tempfile.mkstemp()?
+  with tempfile.NamedTemporaryFile('w', delete=False, prefix='align.msa.') as family_file:
+    for pair in family:
+      name = pair['name'+mate]
+      seq = pair['seq'+mate]
+      family_file.write('>'+name+'\n')
+      family_file.write(seq+'\n')
+  command = [MAFFT, '--nuc', '--quiet', family_file.name]
+  try:
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+  finally:
+      # Make sure we delete the temporary file.
+    os.remove(family_file.name)
+  if process.returncode != 0:
+    fail('Error: Command "{}" returned with non-zero exit status {}:\n{}'
+         .format(' '.join(command), process.returncode, stderr))
+  return read_fasta(stdout, is_file=False, upper=True)
+
+
+def read_fasta(fasta, is_file=True, upper=False):
+  """Quick and dirty FASTA parser. Return the sequences and their names.
+  Returns a list of sequences. Each is a dict of 'name' and 'seq'.
+  Warning: Reads the entire contents of the file into memory at once."""
+  sequences = []
+  sequence = ''
+  seq_name = None
+  if is_file:
+    with open(fasta) as fasta_file:
+      fasta_lines = fasta_file.readlines()
+  else:
+    fasta_lines = fasta.splitlines()
+  for line in fasta_lines:
+    first_word = line.split()[0]
+    if first_word in ('time', 'branch', 'called', 'file'):
+      logging.debug(line)
+    elif line.startswith('>'):
+      if upper:
+        sequence = sequence.upper()
+      if sequence:
+        sequences.append({'name':seq_name, 'seq':sequence})
+      sequence = ''
+      seq_name = line.rstrip('\r\n')[1:]
+    else:
+      sequence += line.strip()
+  if upper:
+    sequence = sequence.upper()
+  if sequence:
+    sequences.append({'name':seq_name, 'seq':sequence})
+  return sequences
 
 
 def format_msa(align, barcode, order, mate, outfile=sys.stdout):
