@@ -1,8 +1,8 @@
-CFLAGS=-Wall
+CFLAGS = -Wall -shared -fPIC
 
 all:
-	gcc -Wall -shared -fPIC align.c -o libalign.so
-	gcc -Wall -shared -fPIC swalign.c -o libswalign.so -lm
-	gcc -Wall -shared -fPIC seqtools.c -o libseqtools.so
-	gcc -Wall -shared -fPIC consensus.c -o libconsensus.so
-
+	gcc $(CFLAGS) align.c -o libalign.so
+	gcc $(CFLAGS) swalign.c -o libswalign.so -lm
+	gcc $(CFLAGS) seqtools.c -o libseqtools.so
+	gcc $(CFLAGS) consensus.c -o libconsensus.so
+	g++ -std=c++11 -Wall seqan_align.cpp -o seqan_align
