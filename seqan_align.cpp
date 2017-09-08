@@ -1,10 +1,35 @@
 #include <iostream>
+#include <stdlib.h>
 #include <seqan/align.h>
 #include <seqan/score.h>
 #include <seqan/sequence.h>
 #include <seqan/graph_msa.h>
 
 using namespace seqan;
+
+char dna5_base_to_char(char dna5_base) {
+    char b;
+    switch ((int)dna5_base) {
+        case 0:
+            b = 'A';
+            break;
+        case 1:
+            b = 'C';
+            break;
+        case 2:
+            b = 'G';
+            break;
+        case 3:
+            b = 'T';
+            break;
+        case 4:
+            b = 'N';
+            break;
+        default:
+            b = '?';
+    }
+    return b;
+}
 
 char **align(int nseq, char *seqs[]) {
 
@@ -17,7 +42,7 @@ char **align(int nseq, char *seqs[]) {
     //TODO: Check that the scoring parameters are appropriate.
     globalMsaAlignment(align, EditDistanceScore());
 
-    char activity = 's';
+    char activity = 'r';
     if (activity == 's') {
         // Print unaligned sequences, translating Dna5 ints into chars.
         typedef typename StringSetType<Align<String<Dna5>>>::Type TStringSet;
@@ -26,26 +51,7 @@ char **align(int nseq, char *seqs[]) {
             char *s = (char *)toCString(strings[i]);
             char b;
             for (int j = 0; j < 40; j++) {
-                switch ((int)s[j]) {
-                    case 0:
-                        b = 'A';
-                        break;
-                    case 1:
-                        b = 'C';
-                        break;
-                    case 2:
-                        b = 'G';
-                        break;
-                    case 3:
-                        b = 'T';
-                        break;
-                    case 4:
-                        b = 'N';
-                        break;
-                    default:
-                        b = '?';
-                }
-                std::cout << b;
+                std::cout << dna5_base_to_char(s[j]);
             }
             std::cout << std::endl;
         }
@@ -54,6 +60,19 @@ char **align(int nseq, char *seqs[]) {
         typedef typename Row<Align<String<Dna5>>>::Type TRow;
         for (int i = 0; i < nseq; i++) {
             TRow arow = row(align, i);
+            int len = (int)length(arow);
+            char *new_seq = (char *)malloc(sizeof(char) * len+1);
+            int offset = 0;
+            for (int j = 0; j < len; j++) {
+                if (isGap(arow, j)) {
+                    new_seq[j] = '-';
+                    offset--;
+                } else {
+                    new_seq[j] = seqs[i][j+offset];
+                }
+            }
+            new_seq[len] = '\0';
+            seqs[i] = new_seq;
             // std::cout << getValue(arow, 1) << std::endl;
         }
     }
@@ -71,8 +90,8 @@ int main(int argc, char *argv[]) {
         argv[i-1] = argv[i];
     }
     char **aligned_seqs = align(argc-1, argv);
-    // for (int i = 0; i < argc-1; i++) {
-    //     std::cout << aligned_seqs[i] << std::endl;
-    // }
+    for (int i = 0; i < argc-1; i++) {
+        std::cout << aligned_seqs[i] << std::endl;
+    }
     return 0;
 }
