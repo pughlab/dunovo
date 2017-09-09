@@ -7,11 +7,11 @@
 
 using namespace seqan;
 
-char **align(int nseq, char *seqs[]) {
+void align_cpp(char *seqs[], int num_seqs) {
 
     Align<String<Dna5>> align;
-    resize(rows(align), nseq);
-    for (int i = 0; i < nseq; i++) {
+    resize(rows(align), num_seqs);
+    for (int i = 0; i < num_seqs; i++) {
         assignSource(row(align, i), seqs[i]);
     }
 
@@ -20,7 +20,7 @@ char **align(int nseq, char *seqs[]) {
 
     // Convert the Align rows to char *'s and store back in seqs.
     typedef typename Row<Align<String<Dna5>>>::Type TRow;
-    for (int i = 0; i < nseq; i++) {
+    for (int i = 0; i < num_seqs; i++) {
         // Each row is type TRow, but also functions as a Gaps. This is why isGap accepts it.
         TRow arow = row(align, i);
         int len = (int)length(arow);
@@ -37,17 +37,21 @@ char **align(int nseq, char *seqs[]) {
         new_seq[len] = '\0';
         seqs[i] = new_seq;
     }
+}
 
-    return seqs;
+extern "C" {
+    void align(char *seqs[], int num_seqs) {
+        align_cpp(seqs, num_seqs);
+    }
 }
 
 int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         argv[i-1] = argv[i];
     }
-    char **aligned_seqs = align(argc-1, argv);
+    align_cpp(argv, argc-1);
     for (int i = 0; i < argc-1; i++) {
-        std::cout << aligned_seqs[i] << std::endl;
+        std::cout << argv[i] << std::endl;
     }
     return 0;
 }
