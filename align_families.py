@@ -28,6 +28,7 @@ REQUIRED_COMMANDS = ['mafft']
 OPT_DEFAULTS = {'processes':1, 'log_file':sys.stderr, 'volume':logging.WARNING}
 DESCRIPTION = """Read in sorted FASTQ data and do multiple sequence alignments of each family."""
 
+METHOD = os.getenv('METHOD')
 
 def main(argv):
 
@@ -292,7 +293,7 @@ def align_family(family, mate):
     seq_alignment = [{'name':family[0]['name'+mate], 'seq':family[0]['seq'+mate]}]
   else:
     # Do the multiple sequence alignment.
-    seq_alignment = make_msa(family, mate)
+    seq_alignment = make_msa(family, mate, METHOD)
   # Transfer the alignment to the quality scores.
   ## Get a list of all sequences in the alignment (mafft output).
   seqs = [read['seq'] for read in seq_alignment]
@@ -306,7 +307,26 @@ def align_family(family, mate):
   return alignment
 
 
-def make_msa(family, mate):
+def make_msa(family, mate, method='seqan'):
+  if method == 'seqan':
+    return make_msa_seqan(family, mate)
+  elif method == 'mafft':
+    return make_msa_mafft(family, mate)
+
+
+def make_msa_seqan(family, mate):
+  import seqan_align
+  seqs = []
+  for pair in family:
+    seqs.append(pair['seq'+mate])
+  alignment = []
+  aligned_seqs = seqan_align.align(seqs)
+  for pair, aligned_seq in zip(family, aligned_seqs):
+    alignment.append({'seq':aligned_seq, 'name':pair['name'+mate]})
+  return alignment
+
+
+def make_msa_mafft(family, mate):
   """Perform a multiple sequence alignment on a set of sequences and parse the result.
   Uses MAFFT."""
   #TODO: Replace with tempfile.mkstemp()?
