@@ -245,8 +245,8 @@ function consensi_thres {
 }
 
 function consensi_regression {
-  _consensi regression.msa.tsv regression.sscs_1.fq regression.sscs_2.fq regression.dcs_1.fq \
-            regression.dcs_2.fq --fastq-out 40
+  _consensi regression.msa.tsv regression.sscs_1.fq regression.sscs_2.fq empty.txt empty.txt \
+            --fastq-out 40
 }
 
 # variable-length reads
