@@ -26,13 +26,15 @@ def make_argparser():
   parser.add_argument('-o', '--output', metavar='reads.fq', type=argparse.FileType('w'),
     default=sys.stdout,
     help='Write output FASTQ reads to this file. If not given, will print to stdout.')
-  parser.add_argument('-q', '--phred-score', required=True, type=int,
+  parser.add_argument('-q', '--phred-score', type=int,
     help='The quality score to give to all bases. There is no meaningful quality score we can '
          'automatically give, so you will have to specify an artificial one. A good choice is 40, '
          'the maximum score normally output by sequencers.')
   parser.add_argument('-F', '--qual-format', choices=('sanger', 'solexa'), default='sanger',
     help='FASTQ quality score format. Sanger scores are assumed to begin at \'{}\' ({}). '
          'Default: %(default)s.'.format(QUAL_OFFSETS['sanger'], chr(QUAL_OFFSETS['sanger'])))
+  parser.add_argument('-a', '--to-fasta', action='store_true',
+    help='Convert FASTQ to FASTA instead. This assumes the input is FASTQ.')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = parser.add_mutually_exclusive_group()
@@ -50,12 +52,18 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
-  qual_start = QUAL_OFFSETS[args.qual_format]
-  if qual_start+args.phred_score > 126:
-    fail('Error: PHRED score ({}) is too large.'.format(args.fastq_out))
-  qual_char = chr(qual_start+args.phred_score)
+  if args.phred_score:
+    qual_start = QUAL_OFFSETS[args.qual_format]
+    if qual_start+args.phred_score > 126:
+      fail('Error: PHRED score ({}) is too large.'.format(args.fastq_out))
+    qual_char = chr(qual_start+args.phred_score)
+  elif not args.to_fasta:
+    fail('Error: --phred-score is required unless --to-fasta is given.')
 
-  fasta_to_fastq(args.input, args.output, qual_char)
+  if args.to_fasta:
+    fastq_to_fasta(args.input, args.output)
+  else:
+    fasta_to_fastq(args.input, args.output, qual_char)
 
   if args.input is not sys.stdin and not args.input.closed:
     args.input.close()
@@ -67,6 +75,11 @@ def fasta_to_fastq(fasta_file, fastq_file, qual_char):
   for read in getreads.getparser(fasta_file, filetype='fasta'):
     quals = qual_char * len(read.seq)
     fastq_file.write('@{0}\n{1}\n+\n{2}\n'.format(read.name, read.seq, quals))
+
+
+def fastq_to_fasta(fastq_file, fasta_file):
+  for read in getreads.getparser(fastq_file, filetype='fastq'):
+    fasta_file.write('>{0}\n{1}\n'.format(read.name, read.seq))
 
 
 def fail(message):
