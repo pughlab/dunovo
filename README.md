@@ -35,7 +35,7 @@ It also requires several standard Unix tools. Version numbers in parentheses are
 To use `align-families.py`'s `-a mafft` option, this must be available on your `$PATH`:  
  - the [`mafft`](http://mafft.cbrc.jp/alignment/software/) command (v7.271 or v7.123b)
 
-To use the barcode error correction script `correct.py`, the following modules must be available from Python and the commands must be on your `$PATH`:
+To use the barcode error correction scripts `baralign.sh` and `correct.py`, the following modules must be available from Python and the commands must be on your `$PATH`:
  - the [networkx](https://pypi.python.org/pypi/networkx) Python module (1.9, 1.10, or 1.11)
  - the [`bowtie`](http://bowtie-bio.sourceforge.net/index.shtml) command (1.2.1.1) (nothing below 1.1.2 is confirmed to work)
  - the [`bowtie-build`](http://bowtie-bio.sourceforge.net/index.shtml) command (1.2.1.1) (same)
