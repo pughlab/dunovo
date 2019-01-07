@@ -6,6 +6,12 @@ The pipeline was designed for use with the duplex method described in [Kennedy *
 
 Du Novo 2.0 is released under the GPLv2 license, except for some portions governed by the MIT license. Earlier versions were released under the BSD license. See `LICENSE.txt` for details.
 
+The first version of Du Novo was [published](https://doi.org/10.1186/s13059-016-1039-4) in Genome Biology in 2016. You can cite it as:
+````
+Stoler N, Arbeithuber B, Guiblet W, Makova KD, Nekrutenko A. 2016.
+Streamlined analysis of duplex sequencing data with Du Novo. Genome Biol 17: 180.
+````
+
 
 ## Running Du Novo from Galaxy
 
