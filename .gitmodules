@@ -12,4 +12,4 @@
 	url = https://github.com/NickSto/bfx.git
 [submodule "pcr"]
 	path = pcr
-	url = git@github.com:NickSto/pcr.git
+	url = https://github.com/NickSto/pcr.git
