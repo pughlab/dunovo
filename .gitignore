@@ -4,6 +4,8 @@
 *.sublime-workspace
 *.fa
 *.tsv
+*.gz
+*.bak
 .venv
 test.*
 misc
