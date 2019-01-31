@@ -24,6 +24,8 @@ def make_argparser():
          'For instance, the output of make-families.awk or align_families.py.')
   parser.add_argument('-r', '--repeats', type=int,
     help='Longest allowed single-base repeat. Default: No limit.')
+  parser.add_argument('-i', '--invalid-bases',
+    help='Bases not allowed in barcodes. Default: No invalid bases.')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'),
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   parser.add_argument('-q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL)
@@ -41,10 +43,10 @@ def main(argv):
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
   tone_down_logger()
 
-  run(args.families, sys.stdout, args.repeats)
+  run(args.families, sys.stdout, args.repeats, args.invalid_bases)
 
 
-def run(families, output, max_repeats):
+def run(families, output, max_repeats, invalid_bases):
   for line in families:
     fields = line.rstrip('\r\n').split('\t')
     if len(fields) <= 1:
@@ -56,13 +58,21 @@ def run(families, output, max_repeats):
     # Apply filters.
     passes = True
     longest_longest_repeat = 0
+    bases_set = None
     if max_repeats is not None:
-      bases = set(barcode)
-      regexes = make_regexes(bases)
+      if bases_set is None:
+        bases_set = set(barcode)
+      regexes = make_regexes(bases_set)
       for half in halves:
         longest_repeat = find_longest_repeat(half, regexes)
         longest_longest_repeat = max(longest_longest_repeat, longest_repeat)
         if longest_repeat > max_repeats:
+          passes = False
+    if invalid_bases is not None:
+      if bases_set is None:
+        bases_set = set(barcode)
+      for base in bases_set:
+        if base in invalid_bases:
           passes = False
     if passes:
       output.write(line)

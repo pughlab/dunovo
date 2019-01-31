@@ -320,6 +320,19 @@ function dunovo {
 }
 
 
+# filter_barcodes.py
+function filt {
+  echo -e "\t${FUNCNAME[0]}:\tfilter_barcodes.py ::: filter.in.tsv"
+  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/precheck.py); then return 1; fi
+  "${local_prefix}filter_barcodes.py" --invalid-bases N --repeats 3 "$dirname/filter.in.tsv" \
+    | diff -s "$dirname/filter.-iN-r3.out.tsv" -
+  "${local_prefix}filter_barcodes.py" --invalid-bases N "$dirname/filter.in.tsv" \
+    | diff -s "$dirname/filter.-iN.out.tsv" -
+  "${local_prefix}filter_barcodes.py" --repeats 5 "$dirname/filter.in.tsv" \
+    | diff -s "$dirname/filter.-r5.out.tsv" -
+}
+
+
 # All tests below here are considered inactive.
 all_declarations_minus_inactive=$(declare -F)
 
