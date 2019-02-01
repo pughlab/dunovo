@@ -11,8 +11,8 @@ import logging
 import argparse
 import collections
 # sys.path hack to access lib package in root directory.
-sys.path.insert(1, os.path.dirname(sys.path[0]))
-sys.path.insert(2, os.path.join(sys.path[1], 'lib'))
+sys.path.insert(0, os.path.dirname(sys.path[0]))
+sys.path.insert(1, os.path.join(sys.path[1], 'lib'))
 # sys.path hack to allow overriding installed pyBamParser.
 if os.environ.get('PYTHONPATH'):
   sys.path.insert(1, os.environ.get('PYTHONPATH'))
@@ -83,7 +83,7 @@ def make_argparser():
     help='Figure out whether there is overlap between mates in read pairs and deduplicate errors '
          'that appear twice because of it. Requires --bam.')
   parser.add_argument('-b', '--bam',
-    help='The final duplex consensus reads, aligned to a reference. Used to find overlaps.')
+    help='The final single-stranded consensus reads, aligned to a reference. Used to find overlaps.')
   parser.add_argument('-s', '--seed', type=int, default=0,
     help='The random seed. Used to choose which error to keep when deduplicating errors in '
          'overlaps. Default: %(default)s')
