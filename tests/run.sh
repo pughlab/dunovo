@@ -332,10 +332,6 @@ function filt {
     | diff -s "$dirname/filter.-r5.out.tsv" -
 }
 
-
-# All tests below here are considered inactive.
-all_declarations_minus_inactive=$(declare -F)
-
 function errstats_simple {
   echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: families.msa.tsv:"
   if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
@@ -344,6 +340,10 @@ function errstats_simple {
   "${local_prefix}errstats.py" -a "$dirname/families.msa.tsv" | diff -s - "$dirname/errstats.-a.out.tsv"
   "${local_prefix}errstats.py" -R -a "$dirname/families.msa.tsv" | diff -s - "$dirname/errstats.-R.-a.out.tsv"
 }
+
+
+# All tests below here are considered inactive.
+all_declarations_minus_inactive=$(declare -F)
 
 function errstats_overlap {
   echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: families.overlap.msa.tsv"

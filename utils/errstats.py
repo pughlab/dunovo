@@ -5,6 +5,7 @@ from __future__ import absolute_import
 from __future__ import unicode_literals
 import os
 import sys
+import copy
 import errno
 import random
 import logging
@@ -32,26 +33,40 @@ consensus sequences. Output is one tab-delimited line per single-read alignment 
 one strand (order) within one family (barcode)).
 A "unique error" is a class of error defined by its reference coordinate and the erroneous base.
 A single unique error may occur several times in the same family, if it happened on multiple reads.
-The default columns are:
-1. barcode
-2. order
-3. mate
-4. number of reads
-5. number of unique errors that were observed in more than one read
-6-end. number of errors in each read
-With --all-repeats, these columns are changed:
-5-end. count of how many times each unique error was observed in the reads
+The output columns depend on the argument to --out-format:
+--out-format reads (default):
+  1. barcode
+  2. order
+  3. mate
+  4. number of reads (family size)
+  5. number of unique errors that were observed in more than one read
+  6-end. number of errors in each read
+--out-format errors1:
+  1. barcode
+  2. order
+  3. mate
+  4. number of reads (family size)
+  5-end. count of how many reads each unique error was observed in
+--out-format errors2:
+  1. barcode
+  2. order
+  3. mate
+  4. read ids (comma-delimited)
+  5. number of reads (family size)
+  6. consensus sequence GC content (0-1 proportion)
+  7-end. count of how many reads each unique error was observed in
+
 Format of --overlap-stats is tab-delimited statistics on each mate:
-1. barcode
-2. order
-3. mate
-4. "True"/"False": did we find this read's opposite mate in the alignment?
-5. length of the overlap region
-6. length of the non-overlap region (in this mate)
-7. number of unique errors in the overlap region
-8. number of unique errors outside the overlap, but aligned to the reference
-9. number of unique errors with no reference coordinate
-10. number of unique errors that appeared on both mates in the pair (duplicates)"""
+  1. barcode
+  2. order
+  3. mate
+  4. "True"/"False": did we find this read's opposite mate in the alignment?
+  5. length of the overlap region
+  6. length of the non-overlap region (in this mate)
+  7. number of unique errors in the overlap region
+  8. number of unique errors outside the overlap, but aligned to the reference
+  9. number of unique errors with no reference coordinate
+  10. number of unique errors that appeared on both mates in the pair (duplicates)"""
 
 
 def make_argparser():
@@ -66,11 +81,13 @@ def make_argparser():
   parser.add_argument('input', metavar='families.msa.tsv', nargs='?', type=argparse.FileType('r'),
     default=sys.stdin,
     help='Aligned families (output of align_families.py). Omit to read from stdin.')
-  parser.add_argument('-a', '--alignment', action='store_true',
-    help='Print the full alignment, with consensus bases masked (to highlight errors).')
-  parser.add_argument('-R', '--all-repeats', action='store_true',
-    help='Output the full count of how many times each error recurred in each single-strand '
-         'alignment.')
+  parser.add_argument('-f', '--out-format', default='sums', choices=('reads', 'errors1', 'errors2'),
+    help='Default: %(default)s')
+  parser.add_argument('-R', '--all-repeats', dest='out_format', action='store_const', const='errors1',
+    help='Backward compatibility shorthand for "--out-format errors1".')
+  parser.add_argument('-a', '--alignment', dest='human', action='store_true',
+    help='Print human-readable output, including a full alignment with consensus bases masked '
+         '(to highlight errors).')
   parser.add_argument('-r', '--min-reads', type=int, default=1,
     help='Minimum number of reads to form a consensus (and thus get any statistics). '
          'Default: %(default)s')
@@ -131,7 +148,9 @@ def main(argv):
       family_stats[barcode] = {'ab':[{}, {}], 'ba':[{}, {}]}
     for order in ('ab', 'ba'):
       for mate in (0, 1):
-        seq_align, qual_align = family[order][mate]
+        seq_align = family[order][mate]['seqs']
+        qual_align = family[order][mate]['quals']
+        names = family[order][mate]['names']
         num_seqs = len(seq_align)
         consensus = get_consensus(seq_align, qual_align, args.qual_thres)
         error_types = get_family_errors(seq_align, qual_align, consensus, error_qual_thres)
@@ -142,8 +161,8 @@ def main(argv):
                                                 'errors':error_types,
                                                 'overlap':overlap}
         elif num_seqs >= args.min_reads:
-          print_errors(barcode, order, mate, error_types, num_seqs, args.all_repeats,
-                       args.alignment, seq_align, qual_align, consensus, family)
+          print_errors(barcode, order, mate, error_types, num_seqs, args.out_format, args.human,
+                       seq_align, qual_align, consensus)
 
   if args.dedup:
     logging.info('Deduplicating errors in overlaps..')
@@ -155,7 +174,7 @@ def main(argv):
           if family_stat['num_seqs'] < args.min_reads:
             continue
           print_errors(barcode, order, mate, family_stat['errors'], family_stat['num_seqs'],
-                       args.all_repeats)
+                       args.out_format)
           if args.overlap_stats:
             print_overlap_stats(barcode, order, mate, args.overlap_stats, family_stat['overlap'])
 
@@ -164,14 +183,30 @@ def parse_families(infile):
   """Parse a families.msa.tsv file.
   Yields a data structure for each family:
   family = {
-    'bar': barcode,                                     # family 'AAACCGACACAGGACTAGGGATCA'
-    'ab': (                                               # order ab
-            ([seq1, seq2, seq3], [quals1, quals2, quals3]), # mate 1
-            ([seq1, seq2], [quals1, quals2]),               # mate 2
+    'bar': barcode,                          # family 'AAACCGACACAGGACTAGGGATCA'
+    'ab': (                                    # order ab
+            {                                    # mate 1
+              'seqs':  [seq1, seq2, seq3],         # sequences
+              'quals': [quals1, quals2, quals3],   # quality scores
+              'names': [name1, name2, name3],      # read names
+            },
+            {                                    # mate 2
+              'seqs':  [seq1, seq2],
+              'quals': [quals1, quals2],
+              'names': [name1, name2]
+            },
           ),
-    'ba': (                                               # order ba
-            ([seq1, seq2], [quals1, quals2]),               # mate 1
-            ([], []),                                       # mate 2
+    'ba': (                                    # order ba
+            {                                    # mate 1
+              'seqs':  [seq1, seq2],
+              'quals': [quals1, quals2]
+              'names': [name1, name2]
+            },
+            {                                    # mate 2
+              'seqs':  [],
+              'quals': [],
+              'names': [],
+            },
           )
   }
   That is, each family is a dict with the 'bar' key giving the barcode sequence, and a key for both
@@ -179,28 +214,39 @@ def parse_families(infile):
   value in the tuple is itself a 2-tuple containing the aligned bases and quality scores.
   Examples:
   Getting the sequences for mate 1 of order "ab":
-  seq_align = family['ab'][0][0]
+  seq_align = family['ab'][0]['seqs']
   Getting the quality scores:
-  seq_align = family['ab'][0][1]
+  seq_align = family['ab'][0]['quals']
   Getting the sequences for mate 2 of order "ba":
-  seq_align = family['ba'][1][0]
+  seq_align = family['ba'][1]['seqs']
   """
   last_barcode = None
-  family = {'bar':None, 'ab':(([],[]), ([],[])), 'ba':(([],[]), ([],[]))}
+  empty_family = {
+    'bar':None,
+    'ab': (
+      {'seqs':[], 'quals':[], 'names':[]},
+      {'seqs':[], 'quals':[], 'names':[]}
+    ),
+    'ba': (
+      {'seqs':[], 'quals':[], 'names':[]},
+      {'seqs':[], 'quals':[], 'names':[]}
+    )
+  }
+  family = copy.deepcopy(empty_family)
   for line in infile:
     fields = line.rstrip('\r\n').split('\t')
-    barcode = fields[0]
-    order = fields[1]
-    mate = int(fields[2])-1
-    seq = fields[4]
-    quals = fields[5]
+    barcode, order, mate_str, name, seq, quals = fields
+    mate = int(mate_str)-1
     if barcode != last_barcode:
       if last_barcode is not None:
+        family['bar'] = last_barcode
         yield family
-      family = {'bar':barcode, 'ab':(([],[]), ([],[])), 'ba':(([],[]), ([],[]))}
+      family = copy.deepcopy(empty_family)
       last_barcode = barcode
-    family[order][mate][0].append(seq)
-    family[order][mate][1].append(quals)
+    family[order][mate]['seqs'].append(seq)
+    family[order][mate]['quals'].append(quals)
+    family[order][mate]['names'].append(name)
+  family['bar'] = barcode
   yield family
 
 
@@ -237,14 +283,14 @@ def get_family_errors(seq_align, qual_align, consensus, qual_thres):
   return list(error_types)
 
 
-def print_errors(barcode, order, mate, error_types, num_seqs, all_repeats, print_alignment=False,
-                 seq_align=None, qual_align=None, consensus=None, family=None):
+def print_errors(barcode, order, mate, error_types, num_seqs, out_format, human=False,
+                 seq_align=None, qual_align=None, consensus=None):
   errors_per_seq, repeated_errors, error_repeat_counts = tally_errors(error_types, num_seqs)
-  if print_alignment:
+  if human:
     masked_alignment = mask_alignment(seq_align, error_types)
     for seq, seq_errors in zip(masked_alignment, errors_per_seq):
       print('{} errors: {}'.format(seq, seq_errors))
-    if all_repeats:
+    if out_format == 'errors1':
       print('{} errors: {}, repeat errors: {}\n'.format(consensus,
                                                         sum(errors_per_seq),
                                                         ', '.join(map(str, error_repeat_counts))))
@@ -252,7 +298,7 @@ def print_errors(barcode, order, mate, error_types, num_seqs, all_repeats, print
       print('{} errors: {}, repeat errors: {}\n'.format(consensus,
                                                         sum(errors_per_seq),
                                                         repeated_errors))
-  elif all_repeats:
+  elif out_format == 'errors1':
     print(barcode, order, mate, num_seqs, *error_repeat_counts, sep='\t')
   else:
     print(barcode, order, mate, num_seqs, repeated_errors, *errors_per_seq, sep='\t')

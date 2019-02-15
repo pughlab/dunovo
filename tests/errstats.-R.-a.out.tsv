@@ -37,10 +37,10 @@ TAAGGATACTAGTATAAGAG errors: 2, repeat errors: 1, 1
 .............C...... errors: 1
 TCTATCATTATGTTTTGAGG errors: 1, repeat errors: 1
 
--G..................C errors: 3
+.....-..............C errors: 2
 ..................... errors: 0
 ..................... errors: 0
-GCCCCCTCTACCCCCTCTAG- errors: 3, repeat errors: 1, 1, 1
+GCCCCCTCTACCCCCTCTAG- errors: 2, repeat errors: 1, 1
 
 .................... errors: 0
 TCGGTTGTTGATGAGATATT errors: 0, repeat errors: 
