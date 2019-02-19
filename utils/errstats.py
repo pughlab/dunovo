@@ -37,18 +37,19 @@ A single unique error may occur several times in the same family, if it happened
 The first four output columns are always:
   1. barcode
   2. order
-  3. mate
+  3. mate (0 or 1)
   4. number of reads (family size)
 The following columns depend on the argument to --out-format:
 --out-format reads (default):
   5. number of unique errors that were observed in more than one read
   6-end. number of errors in each read
---out-format errors1:
+--out-format errors1 (aka --all-repeats):
   5-end. count of how many reads each unique error was observed in
 --out-format errors2:
   5. read ids (comma-delimited)
   6. consensus sequence GC content (0-1 proportion)
-  7-end. count of how many reads each unique error was observed in
+  7. number of unique errors
+  8-end. count of how many reads each unique error was observed in
 
 Format of --overlap-stats is tab-delimited statistics on each mate:
   1. barcode
@@ -85,6 +86,8 @@ def make_argparser():
   parser.add_argument('-r', '--min-reads', type=int, default=1,
     help='Minimum number of reads to form a consensus (and thus get any statistics). '
          'Default: %(default)s')
+  parser.add_argument('-1', '--mate1', dest='mate_offset', action='store_const', default=0, const=1,
+    help='Use 1-based indexing for mate numbering (1 and 2 instead of 0 and 1).')
   #TODO:
   # parser.add_argument('-c', '--cons-thres', type=float, default=0.5)
   parser.add_argument('-q', '--qual-thres', type=int, default=0,
@@ -127,6 +130,9 @@ def main(argv):
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
   tone_down_logger()
 
+  if args.human and args.out_format == 'errors2':
+    fail('Error: --alignment invalid with --out-format errors2.')
+
   if args.dedup:
     if not args.bam:
       fail('--dedup requires a --bam file to be supplied.')
@@ -161,8 +167,8 @@ def main(argv):
         if args.dedup:
           family_stats[barcode][order][mate] = family_stat
         elif num_seqs >= args.min_reads:
-          print_errors(barcode, order, mate, family_stat, args.out_format, args.human,
-                       seq_align, qual_align)
+          print_errors(barcode, order, mate+args.mate_offset, family_stat, args.out_format,
+                       args.human, seq_align, qual_align)
 
   if args.dedup:
     logging.info('Deduplicating errors in overlaps..')
@@ -173,7 +179,7 @@ def main(argv):
           family_stat = family_stats[barcode][order][mate]
           if family_stat['num_seqs'] < args.min_reads:
             continue
-          print_errors(barcode, order, mate, family_stat, args.out_format)
+          print_errors(barcode, order, mate+args.mate_offset, family_stat, args.out_format)
           if args.overlap_stats:
             print_overlap_stats(barcode, order, mate, args.overlap_stats, family_stat['overlap'])
 
@@ -319,6 +325,7 @@ def print_errors(barcode, order, mate, family_stat, out_format, human=False,
     elif out_format == 'errors2':
       fields.append(','.join(family_stat['ids']))
       fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
+      fields.append(len(error_repeat_counts))
       fields.extend(error_repeat_counts)
     print(*fields, sep='\t')
 
