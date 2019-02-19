@@ -144,6 +144,7 @@ function inactive {
 # Run the errstats.py-specific tests.
 function errstats {
   errstats_simple
+  errstats_indels
   errstats_overlap
 }
 
@@ -335,10 +336,29 @@ function filt {
 function errstats_simple {
   echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: families.msa.tsv:"
   if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
-  "${local_prefix}errstats.py" "$dirname/families.msa.tsv" | diff -s - "$dirname/errstats.out.tsv"
-  "${local_prefix}errstats.py" -R "$dirname/families.msa.tsv" | diff -s - "$dirname/errstats.-R.out.tsv"
-  "${local_prefix}errstats.py" -a "$dirname/families.msa.tsv" | diff -s - "$dirname/errstats.-a.out.tsv"
-  "${local_prefix}errstats.py" -R -a "$dirname/families.msa.tsv" | diff -s - "$dirname/errstats.-R.-a.out.tsv"
+  "${local_prefix}errstats.py" "$dirname/families.msa.tsv" \
+    | diff -s "$dirname/errstats.out.tsv" -
+  "${local_prefix}errstats.py" --out-format errors1 "$dirname/families.msa.tsv" \
+    | diff -s "$dirname/errstats.-R.out.tsv" -
+  "${local_prefix}errstats.py" --alignment "$dirname/families.msa.tsv" \
+    | diff -s "$dirname/errstats.-a.out.tsv" -
+  "${local_prefix}errstats.py" --out-format errors1 --alignment "$dirname/families.msa.tsv" \
+    | diff -s "$dirname/errstats.-R.-a.out.tsv" -
+  "${local_prefix}errstats.py" --out-format errors2 "$dirname/families.msa.tsv" \
+    | diff -s "$dirname/errstats.errors2.out.tsv" -
+}
+
+function errstats_indels {
+  echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: families.unequal.msa.tsv:"
+  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
+  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format reads \
+    | diff -s "$dirname/errstats.indels.reads.out.tsv" -
+  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format reads --no-indels \
+    | diff -s "$dirname/errstats.indels.reads.-I.out.tsv" -
+  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format errors1 \
+    | diff -s "$dirname/errstats.indels.errors1.out.tsv" -
+  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format errors1 --no-indels \
+    | diff -s "$dirname/errstats.indels.errors1.-I.out.tsv" -
 }
 
 
