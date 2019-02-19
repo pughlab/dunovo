@@ -92,6 +92,10 @@ def make_argparser():
          'used for producing the reads in the bam file, if provided! Default: %(default)s')
   parser.add_argument('-Q', '--qual-errors', action='store_true',
     help='Don\'t count errors with quality scores below the --qual-thres in the error counts.')
+  parser.add_argument('-I', '--no-indels', dest='indels', action='store_false', default=True,
+    help='Don\'t count indels. Note: the indel counting isn\'t good right now. It counts every '
+         'base of the indel as a separate error, so a 3bp deletion counts as 3 errors. '
+         'Default is to count them, for backward compatibility. Some day I may remove this footgun.')
   parser.add_argument('-d', '--dedup', action='store_true',
     help='Figure out whether there is overlap between mates in read pairs and deduplicate errors '
          'that appear twice because of it. Requires --bam.')
@@ -149,7 +153,8 @@ def main(argv):
         ids = family[order][mate]['ids']
         num_seqs = len(seq_align)
         consensus = get_consensus(seq_align, qual_align, args.qual_thres)
-        error_types = get_family_errors(seq_align, qual_align, consensus, error_qual_thres)
+        error_types = get_family_errors(seq_align, qual_align, consensus, error_qual_thres,
+                                        count_indels=args.indels)
         overlap = collections.defaultdict(int)
         family_stat = {'num_seqs':num_seqs, 'consensus':consensus, 'errors':error_types,
                        'overlap':overlap, 'ids':ids}
@@ -279,10 +284,11 @@ def get_gc_content(seq):
   return gc/len(seq)
 
 
-def get_family_errors(seq_align, qual_align, consensus, qual_thres):
+def get_family_errors(seq_align, qual_align, consensus, qual_thres, count_indels=False):
   if not (seq_align and qual_align):
     return None
-  errors = get_alignment_errors(consensus, seq_align, qual_align, qual_thres)
+  errors = get_alignment_errors(consensus, seq_align, qual_align, qual_thres,
+                                count_indels=count_indels)
   error_types = group_errors(errors)
   return list(error_types)
 
@@ -309,7 +315,7 @@ def print_errors(barcode, order, mate, family_stat, out_format, human=False,
       fields.extend(error_repeat_counts)
     if out_format == 'errors2':
       fields.append(','.join(family_stat['ids']))
-      fields.append('{:0.2f}'.format(get_gc_content(family_stat['consensus'])))
+      fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
       fields.extend(errors_per_seq)
     else:
       fields.append(repeated_errors)
@@ -330,14 +336,17 @@ def print_overlap_stats(barcode, order, mate, stats_fh, stats):
   stats_fh.write('\t'.join(map(str, columns))+'\n')
 
 
-def get_alignment_errors(consensus_seq, seq_align, qual_align, qual_thres):
+def get_alignment_errors(consensus_seq, seq_align, qual_align, qual_thres, count_indels=False):
   qual_thres_char = chr(qual_thres+32)
   errors = []
   for coord, (cons_base, bases, quals) in enumerate(zip(consensus_seq, zip(*seq_align), zip(*qual_align))):
     for seq_num, (base, qual) in enumerate(zip(bases, quals)):
       #TODO: Don't count each indel multiple times.
       if base != cons_base and qual >= qual_thres_char:
-        errors.append((seq_num, coord+1, base))
+        # Mismatch between the read and consensus, and quality is above the threshold.
+        if count_indels or (base != '-' and cons_base != '-'):
+          # Either it's not an indel, or we're counting indels.
+          errors.append((seq_num, coord+1, base))
   return errors
 
 
