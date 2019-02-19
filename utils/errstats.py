@@ -311,15 +311,15 @@ def print_errors(barcode, order, mate, family_stat, out_format, human=False,
                                                         repeated_errors))
   else:
     fields = [barcode, order, mate, family_stat['num_seqs']]
-    if out_format == 'errors1':
-      fields.extend(error_repeat_counts)
-    if out_format == 'errors2':
-      fields.append(','.join(family_stat['ids']))
-      fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
-      fields.extend(errors_per_seq)
-    else:
+    if out_format == 'reads':
       fields.append(repeated_errors)
       fields.extend(errors_per_seq)
+    elif out_format == 'errors1':
+      fields.extend(error_repeat_counts)
+    elif out_format == 'errors2':
+      fields.append(','.join(family_stat['ids']))
+      fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
+      fields.extend(error_repeat_counts)
     print(*fields, sep='\t')
 
 
