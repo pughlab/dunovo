@@ -348,8 +348,7 @@ def get_alignment_errors(consensus_seq, seq_align, qual_align, qual_thres, count
   errors = []
   for coord, (cons_base, bases, quals) in enumerate(zip(consensus_seq, zip(*seq_align), zip(*qual_align))):
     for seq_num, (base, qual) in enumerate(zip(bases, quals)):
-      #TODO: Don't count each indel multiple times.
-      if base != cons_base and qual >= qual_thres_char:
+      if base != cons_base and cons_base != 'N' and qual >= qual_thres_char:
         # Mismatch between the read and consensus, and quality is above the threshold.
         if count_indels or (base != '-' and cons_base != '-'):
           # Either it's not an indel, or we're counting indels.
