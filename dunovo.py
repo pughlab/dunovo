@@ -18,7 +18,9 @@ def make_argparser():
     help='Input reads (mate 1). Can be gzipped.')
   io.add_argument('fastq2', metavar='reads_2.fq', type=open_as_text_or_gzip,
     help='Input reads (mate 2). Can be gzipped.')
-  io.add_argument('-o', '--outdir')
+  io.add_argument('-o', '--outdir',
+    help='The directory to create the output (and intermediate) files in. Must exist already and '
+         'not already contain any of the output/intermediate files.')
   io.add_argument('-s', '--suffix',
     help='A string to use in naming the output files. If given, will be put just before the file '
          'extension (like "families.suffix.tsv").')
@@ -86,6 +88,11 @@ def main(argv):
   logging.basicConfig(stream=stream, level=args.volume, format='%(message)s')
 
   # Create and check output paths.
+  if not os.path.isdir(args.outdir):
+    if os.path.exists(args.outdir):
+      fail('Error: --output directory "{}" is not a directory.'.format(args.outdir))
+    else:
+      fail('Error: --output directory must already exist! Could not find "{}"'.format(args.outdir))
   paths, log_paths = make_paths(args.outdir, args.log_dir, args.fastq1.name, args.suffix)
   if invalid_paths(paths, log_paths, args.log_dir):
     return 1
