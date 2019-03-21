@@ -5,7 +5,9 @@ import logging
 import os
 import subprocess
 import sys
+import shims
 assert sys.version_info.major >= 3, 'Python 3 required'
+version = shims.get_module_or_shim('utillib.version')
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 DESCRIPTION = """Run the entire Du Novo pipeline."""
@@ -69,9 +71,12 @@ def make_argparser():
     default=logging.WARNING)
   volume.add_argument('-v', '--verbose', dest='volume', action='store_const', const=logging.INFO)
   volume.add_argument('--debug', dest='volume', action='store_const', const=logging.DEBUG)
+  #TODO: Add --phone-home.
   misc = parser.add_argument_group('Miscellaneous')
   misc.add_argument('-V', '--no-validate', dest='validate', action='store_false', default=True,
     help='Skip validation checks on the outputs of individual scripts.')
+  misc.add_argument('--version', action='version', version=str(version.get_version()),
+    help='Print the version number and exit.')
   misc.add_argument('-h', '--help', action='help',
     help='Print this help text and exit.')
   return parser
