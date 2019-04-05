@@ -1,7 +1,9 @@
 import os
+import sys
 import errno
 import ctypes
 import string
+PY3 = sys.version_info.major >= 3
 
 # Locate the library file.
 LIBFILE = 'libswalign.so'
@@ -14,7 +16,10 @@ if not os.path.isfile(library_path):
 
 swalign = ctypes.cdll.LoadLibrary(library_path)
 
-REVCOMP_TABLE = string.maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+if PY3:
+  REVCOMP_TABLE = str.maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+else:
+  REVCOMP_TABLE = string.maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
 
 
 # C struct for ctypes
@@ -45,6 +50,9 @@ class Align(object):
   def __init__(self, align_c):
     self.target = align_c.seqs.contents.a
     self.query = align_c.seqs.contents.b
+    if PY3:
+      self.target = str(self.target, 'utf8')
+      self.query = str(self.query, 'utf8')
     # Where the first base of the target aligns on the query, in query coordinates (or 1, if <= 0).
     self.start_target = align_c.start_a
     # Where the first base of the query aligns on the target, in target coordinates (or 1, if <= 0).
@@ -74,6 +82,9 @@ swalign.revcomp.restype = ctypes.c_char_p
 
 
 def smith_waterman(target, query):
+  if PY3:
+    target = bytes(target, 'utf8')
+    query = bytes(query, 'utf8')
   seq_pair = SeqPairC(target, len(target), query, len(query))
   align_c = swalign.smith_waterman(ctypes.pointer(seq_pair), 1).contents
   return Align(align_c)
@@ -101,4 +112,5 @@ def revcomp(seq):
 def revcomp_inplace(seq):
   """Convert the input sequence to its reverse complement.
   WARNING: This will alter the input string in-place!"""
+  assert not PY3, 'This method is not compatible with Python 3!'
   swalign.revcomp(seq)

@@ -4,6 +4,7 @@ import sys
 import errno
 import ctypes
 import argparse
+PY3 = sys.version_info.major >= 3
 
 # Locate the library file.
 LIBFILE = 'libconsensus.so'
@@ -47,6 +48,8 @@ def main(argv):
 # N.B.: The quality scores must be aligned with their accompanying sequences.
 def get_consensus(align, quals=[], cons_thres=-1.0, min_reads=0, qual_thres=' ', gapped=False):
   cons_thres_c = ctypes.c_double(cons_thres)
+  if PY3:
+    qual_thres = ord(qual_thres)
   qual_thres_c = ctypes.c_char(qual_thres)
   n_seqs = len(align)
   if gapped:
@@ -64,22 +67,33 @@ def get_consensus(align, quals=[], cons_thres=-1.0, min_reads=0, qual_thres=' ',
                              '\nAlignment:\n{}'.format(seq_len, len(seq), '\n'.join(align)))
   align_c = (ctypes.c_char_p * n_seqs)()
   for i, seq in enumerate(align):
+    if PY3:
+      seq = bytes(seq, 'utf8')
     align_c[i] = ctypes.c_char_p(seq)
   quals_c = (ctypes.c_char_p * n_seqs)()
   for i, qual in enumerate(quals):
+    if PY3:
+      qual = bytes(qual, 'utf8')
     quals_c[i] = ctypes.c_char_p(qual)
   if not quals:
     quals_c = 0
-  return consensus.get_consensus(align_c, quals_c, n_seqs, seq_len, cons_thres_c, min_reads,
+  cons = consensus.get_consensus(align_c, quals_c, n_seqs, seq_len, cons_thres_c, min_reads,
                                  qual_thres_c, gapped_c)
+  if PY3:
+    return str(cons, 'utf8')
+  else:
+    return cons
 
 
 # N.B.: The quality scores must be aligned with their accompanying sequences.
 def get_consensus_duplex(align1, align2, quals1=[], quals2=[], cons_thres=-1.0, min_reads=0,
                          qual_thres=' ', method='iupac'):
   assert method in ('iupac', 'freq')
-  cons_thres_c = ctypes.c_double(cons_thres)
+  if PY3:
+    method = bytes(method, 'utf8')
+    qual_thres = ord(qual_thres)
   qual_thres_c = ctypes.c_char(qual_thres)
+  cons_thres_c = ctypes.c_double(cons_thres)
   n_seqs1 = len(align1)
   n_seqs2 = len(align2)
   assert (not quals1 and not quals2) or (quals1 and quals2)
@@ -93,33 +107,48 @@ def get_consensus_duplex(align1, align2, quals1=[], quals2=[], cons_thres=-1.0, 
       assert seq_len == len(seq), 'All sequences in the alignment must be the same length.'
   align1_c = (ctypes.c_char_p * n_seqs1)()
   for i, seq in enumerate(align1):
+    if PY3:
+      seq = bytes(seq, 'utf8')
     align1_c[i] = ctypes.c_char_p(seq)
   align2_c = (ctypes.c_char_p * n_seqs1)()
   for i, seq in enumerate(align2):
+    if PY3:
+      seq = bytes(seq, 'utf8')
     align2_c[i] = ctypes.c_char_p(seq)
   quals1_c = (ctypes.c_char_p * n_seqs1)()
-  for i, seq in enumerate(quals1):
-    quals1_c[i] = ctypes.c_char_p(seq)
+  for i, quals in enumerate(quals1):
+    if PY3:
+      quals = bytes(quals, 'utf8')
+    quals1_c[i] = ctypes.c_char_p(quals)
   quals2_c = (ctypes.c_char_p * n_seqs1)()
-  for i, seq in enumerate(quals2):
-    quals2_c[i] = ctypes.c_char_p(seq)
+  for i, quals in enumerate(quals2):
+    if PY3:
+      quals = bytes(quals, 'utf8')
+    quals2_c[i] = ctypes.c_char_p(quals)
   if not quals1:
     quals1_c = 0
   if not quals2:
     quals2_c = 0
-  return consensus.get_consensus_duplex(align1_c, align2_c, quals1_c, quals2_c, n_seqs1, n_seqs2,
+  cons = consensus.get_consensus_duplex(align1_c, align2_c, quals1_c, quals2_c, n_seqs1, n_seqs2,
                                         seq_len, cons_thres_c, min_reads, qual_thres_c, method)
 
 
 def build_consensus_duplex_simple(cons1, cons2, gapped=False):
   assert len(cons1) == len(cons2)
+  if PY3:
+    cons1 = bytes(cons1, 'utf8')
+    cons2 = bytes(cons2, 'utf8')
   cons1_c = ctypes.c_char_p(cons1)
   cons2_c = ctypes.c_char_p(cons2)
   if gapped:
     gapped_c = 1
   else:
     gapped_c = 0
-  return consensus.build_consensus_duplex_simple(cons1_c, cons2_c, gapped_c)
+  cons = consensus.build_consensus_duplex_simple(cons1_c, cons2_c, gapped_c)
+  if PY3:
+    return str(cons, 'utf8')
+  else:
+    return cons
 
 
 if __name__ == '__main__':
