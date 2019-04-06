@@ -372,8 +372,8 @@ def make_msa_kalign(family, mate):
     logging.critical('Error importing kalign module. Check that the submodule is installed properly.')
     raise
   seqs = [pair['seq'+mate] for pair in family]
-  aln_struct = kalign.align(seqs)
-  return [aln_struct.seqs[i] for i in range(aln_struct.nseqs)]
+  aligned_seqs = kalign.align(seqs)
+  return aligned_seqs
 
 
 def make_msa_mafft(family, mate):
