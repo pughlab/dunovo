@@ -104,13 +104,13 @@ def get_consensus_duplex(align1, align2, quals1=[], quals2=[], cons_thres=-1.0, 
     else:
       assert seq_len == len(seq), 'All sequences in the alignment must be the same length.'
   align1_c = str_pylist_to_str_carray(align1, length=n_seqs1)
-  align2_c = str_pylist_to_str_carray(align2, length=n_seqs1)
+  align2_c = str_pylist_to_str_carray(align2, length=n_seqs2)
   if quals1:
     quals1_c = str_pylist_to_str_carray(quals1, length=n_seqs1)
   else:
     quals1_c = 0
   if quals2:
-    quals2_c = str_pylist_to_str_carray(quals2, length=n_seqs1)
+    quals2_c = str_pylist_to_str_carray(quals2, length=n_seqs2)
   else:
     quals2_c = 0
   cons = consensus.get_consensus_duplex(align1_c, align2_c, quals1_c, quals2_c, n_seqs1, n_seqs2,
@@ -146,7 +146,7 @@ def str_pylist_to_str_carray(str_pylist, length=None, encoding='utf8'):
   if length is None:
     length = len(str_pylist)
   str_carray = (ctypes.c_char_p * length)()
-  for i, str_raw in enumerate(align):
+  for i, str_raw in enumerate(str_pylist):
     if PY3:
       str_bytes = bytes(str_raw, encoding)
     else:
