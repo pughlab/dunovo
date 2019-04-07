@@ -24,6 +24,7 @@ except ImportError:
   pass
 from utillib import simplewrap
 import consensus as consensuslib
+PY3 = sys.version_info.major >= 3
 
 REVCOMP_MAP = {'a':'t', 'c':'g', 'g':'c', 't':'a', 'r':'y', 'y':'r', 'm':'k', 'k':'m', 'b':'v',
                'd':'h', 'h':'d', 'v':'b', 'A':'T', 'C':'G', 'G':'C', 'T':'A', 'R':'Y', 'Y':'R',
@@ -80,6 +81,9 @@ def make_argparser():
     help='Default: %(default)s')
   parser.add_argument('-R', '--all-repeats', dest='out_format', action='store_const', const='errors1',
     help='Backward compatibility shorthand for "--out-format errors1".')
+  parser.add_argument('-D', '--duplex', action='store_true',
+    help='Use the full duplex family to determine the consensus sequence, not just the single-'
+         'stranded family.')
   parser.add_argument('-a', '--alignment', dest='human', action='store_true',
     help='Print human-readable output, including a full alignment with consensus bases masked '
          '(to highlight errors).')
@@ -117,7 +121,7 @@ def make_argparser():
   parser.add_argument('-S', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
     default=logging.ERROR)
   parser.add_argument('-v', '--verbose', dest='volume', action='store_const', const=logging.INFO)
-  parser.add_argument('-D', '--debug', dest='volume', action='store_const', const=logging.DEBUG)
+  parser.add_argument('--debug', dest='volume', action='store_const', const=logging.DEBUG)
 
   return parser
 
@@ -129,6 +133,9 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
   tone_down_logger()
+
+  if args.duplex:
+    raise NotImplementedError('--duplex not yet supported.')
 
   if args.human and args.out_format == 'errors2':
     fail('Error: --alignment invalid with --out-format errors2.')
@@ -147,18 +154,34 @@ def main(argv):
     error_qual_thres = 0
 
   logging.info('Calculating consensus sequences and counting errors..')
+  single_strand_families = double_strand_families = 0
   family_stats = {}
   for family in parse_families(args.input):
     barcode = family['bar']
     if args.dedup:
       family_stats[barcode] = {'ab':[{}, {}], 'ba':[{}, {}]}
+    add_consensi(family, args.qual_thres)
+    if is_double_stranded(family):
+      double_strand_families += 1
+      if args.duplex:
+        duplex_consensi = get_duplex_consensi(family)
+    else:
+      single_strand_families += 1
+      if args.duplex:
+        continue
     for order in ('ab', 'ba'):
       for mate in (0, 1):
         seq_align = family[order][mate]['seqs']
         qual_align = family[order][mate]['quals']
         ids = family[order][mate]['ids']
         num_seqs = len(seq_align)
-        consensus = get_consensus(seq_align, qual_align, args.qual_thres)
+        if args.duplex:
+          if (order == 'ab' and mate == 0) or (order == 'ba' and mate == 1):
+            consensus = duplex_consensi[0]
+          else:
+            consensus = duplex_consensi[1]
+        else:
+          consensus = family[order][mate]['consensus']
         error_types = get_family_errors(seq_align, qual_align, consensus, error_qual_thres,
                                         count_indels=args.indels)
         overlap = collections.defaultdict(int)
@@ -169,6 +192,10 @@ def main(argv):
         elif num_seqs >= args.min_reads:
           print_errors(barcode, order, mate+args.mate_offset, family_stat, args.out_format,
                        args.human, seq_align, qual_align)
+
+  total = single_strand_families + double_strand_families
+  logging.info('Processed {} families: {:0.2f}% single-stranded, {:0.2f}% double-stranded.'
+               .format(total, 100*single_strand_families/total, 100*double_strand_families/total))
 
   if args.dedup:
     logging.info('Deduplicating errors in overlaps..')
@@ -191,21 +218,21 @@ def parse_families(infile):
     'bar': barcode,                          # family 'AAACCGACACAGGACTAGGGATCA'
     'ab': (                                    # order ab
             {                                    # mate 1
-              'seqs':  [seq1, seq2, seq3],         # sequences
+              'seqs':  [seq1,   seq2,   seq3],     # sequences
               'quals': [quals1, quals2, quals3],   # quality scores
-              'ids':   [id1, id2, id3],            # read ids
+              'ids':   [id1,    id2,    id3],      # read ids
             },
             {                                    # mate 2
-              'seqs':  [seq1, seq2],
+              'seqs':  [seq1,   seq2],
               'quals': [quals1, quals2],
-              'ids':   [id1, id2]
+              'ids':   [id1,    id2]
             },
           ),
     'ba': (                                    # order ba
             {                                    # mate 1
-              'seqs':  [seq1, seq2],
+              'seqs':  [seq1,   seq2],
               'quals': [quals1, quals2]
-              'ids':   [id1, id2]
+              'ids':   [id1,    id2]
             },
             {                                    # mate 2
               'seqs':  [],
@@ -219,9 +246,9 @@ def parse_families(infile):
   value in the tuple is itself a 2-tuple containing the aligned bases and quality scores.
   Examples:
   Getting the sequences for mate 1 of order "ab":
-  seq_align = family['ab'][0]['seqs']
+  seq_align  = family['ab'][0]['seqs']
   Getting the quality scores:
-  seq_align = family['ab'][0]['quals']
+  qual_align = family['ab'][0]['quals']
   Getting the sequences for mate 2 of order "ba":
   seq_align = family['ba'][1]['seqs']
   """
@@ -260,29 +287,25 @@ def parse_families(infile):
   yield family
 
 
-def get_consensus(seq_align, qual_align, qual_thres):
-  """Wrapper around consensus.get_consensus().
-  When running under Python 3, this encodes strings passed to it as bytes and decodes its return
-  value into str."""
-  if not (seq_align and qual_align):
-    return None
-  if sys.version_info.major == 3:
-    seqs_bytes = [bytes(seq, 'utf8') for seq in seq_align]
-    quals_bytes = [bytes(qual, 'utf8') for qual in qual_align]
-    qual_thres_byte = qual_thres+32
-  else:
-    seqs_bytes = seq_align
-    quals_bytes = qual_align
-    qual_thres_byte = chr(qual_thres+32)
-  cons_bytes = consensuslib.get_consensus(seqs_bytes,
-                                          quals_bytes,
-                                          qual_thres=qual_thres_byte,
-                                          gapped=True)
-  if sys.version_info.major == 3:
-    cons_seq = str(cons_bytes, 'utf8')
-  else:
-    cons_seq = cons_bytes
-  return cons_seq
+def add_consensi(family, qual_thres):
+  for order in ('ab', 'ba'):
+    for mate in (0, 1):
+      subfamily = family[order][mate]
+      subfamily['consensus'] = consensuslib.get_consensus(subfamily['seqs'], subfamily['quals'],
+                                                          qual_thres=chr(qual_thres+32), gapped=True)
+
+
+def get_duplex_consensi(family):
+  cons1 = consensuslib.build_consensus_duplex_simple(family['ab'][0]['consensus'],
+                                                     family['ba'][1]['consensus'], gapped=True)
+  cons2 = consensuslib.build_consensus_duplex_simple(family['ab'][1]['consensus'],
+                                                     family['ba'][0]['consensus'], gapped=True)
+  return [cons1, cons2]
+
+
+def is_double_stranded(family):
+  return (family['ab'][0]['seqs'] and family['ba'][1]['seqs'] and
+          family['ab'][1]['seqs'] and family['ba'][0]['seqs'])
 
 
 def get_gc_content(seq):
