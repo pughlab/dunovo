@@ -49,8 +49,10 @@ def main(argv):
 def get_consensus(align, quals=[], cons_thres=-1.0, min_reads=0, qual_thres=' ', gapped=False):
   cons_thres_c = ctypes.c_double(cons_thres)
   if PY3:
-    qual_thres = ord(qual_thres)
-  qual_thres_c = ctypes.c_char(qual_thres)
+    qual_thres_val = ord(qual_thres)
+  else:
+    qual_thres_val = qual_thres
+  qual_thres_c = ctypes.c_char(qual_thres_val)
   n_seqs = len(align)
   if gapped:
     gapped_c = 1
@@ -65,17 +67,10 @@ def get_consensus(align, quals=[], cons_thres=-1.0, min_reads=0, qual_thres=' ',
       if seq_len != len(seq):
         raise AssertionError('All sequences in the alignment must be the same length: {}bp != {}bp.'
                              '\nAlignment:\n{}'.format(seq_len, len(seq), '\n'.join(align)))
-  align_c = (ctypes.c_char_p * n_seqs)()
-  for i, seq in enumerate(align):
-    if PY3:
-      seq = bytes(seq, 'utf8')
-    align_c[i] = ctypes.c_char_p(seq)
-  quals_c = (ctypes.c_char_p * n_seqs)()
-  for i, qual in enumerate(quals):
-    if PY3:
-      qual = bytes(qual, 'utf8')
-    quals_c[i] = ctypes.c_char_p(qual)
-  if not quals:
+  align_c = str_pylist_to_str_carray(align, length=n_seqs)
+  if quals:
+    quals_c = str_pylist_to_str_carray(quals, length=n_seqs)
+  else:
     quals_c = 0
   cons = consensus.get_consensus(align_c, quals_c, n_seqs, seq_len, cons_thres_c, min_reads,
                                  qual_thres_c, gapped_c)
@@ -90,9 +85,12 @@ def get_consensus_duplex(align1, align2, quals1=[], quals2=[], cons_thres=-1.0, 
                          qual_thres=' ', method='iupac'):
   assert method in ('iupac', 'freq')
   if PY3:
-    method = bytes(method, 'utf8')
-    qual_thres = ord(qual_thres)
-  qual_thres_c = ctypes.c_char(qual_thres)
+    method_bytes = bytes(method, 'utf8')
+    qual_thres_val = ord(qual_thres)
+  else:
+    method_bytes = method
+    qual_thres_val = qual_thres
+  qual_thres_c = ctypes.c_char(qual_thres_val)
   cons_thres_c = ctypes.c_double(cons_thres)
   n_seqs1 = len(align1)
   n_seqs2 = len(align2)
@@ -105,41 +103,34 @@ def get_consensus_duplex(align1, align2, quals1=[], quals2=[], cons_thres=-1.0, 
       seq_len = len(seq)
     else:
       assert seq_len == len(seq), 'All sequences in the alignment must be the same length.'
-  align1_c = (ctypes.c_char_p * n_seqs1)()
-  for i, seq in enumerate(align1):
-    if PY3:
-      seq = bytes(seq, 'utf8')
-    align1_c[i] = ctypes.c_char_p(seq)
-  align2_c = (ctypes.c_char_p * n_seqs1)()
-  for i, seq in enumerate(align2):
-    if PY3:
-      seq = bytes(seq, 'utf8')
-    align2_c[i] = ctypes.c_char_p(seq)
-  quals1_c = (ctypes.c_char_p * n_seqs1)()
-  for i, quals in enumerate(quals1):
-    if PY3:
-      quals = bytes(quals, 'utf8')
-    quals1_c[i] = ctypes.c_char_p(quals)
-  quals2_c = (ctypes.c_char_p * n_seqs1)()
-  for i, quals in enumerate(quals2):
-    if PY3:
-      quals = bytes(quals, 'utf8')
-    quals2_c[i] = ctypes.c_char_p(quals)
-  if not quals1:
+  align1_c = str_pylist_to_str_carray(align1, length=n_seqs1)
+  align2_c = str_pylist_to_str_carray(align2, length=n_seqs1)
+  if quals1:
+    quals1_c = str_pylist_to_str_carray(quals1, length=n_seqs1)
+  else:
     quals1_c = 0
-  if not quals2:
+  if quals2:
+    quals2_c = str_pylist_to_str_carray(quals2, length=n_seqs1)
+  else:
     quals2_c = 0
   cons = consensus.get_consensus_duplex(align1_c, align2_c, quals1_c, quals2_c, n_seqs1, n_seqs2,
-                                        seq_len, cons_thres_c, min_reads, qual_thres_c, method)
-
-
-def build_consensus_duplex_simple(cons1, cons2, gapped=False):
-  assert len(cons1) == len(cons2)
+                                        seq_len, cons_thres_c, min_reads, qual_thres_c, method_bytes)
   if PY3:
-    cons1 = bytes(cons1, 'utf8')
-    cons2 = bytes(cons2, 'utf8')
-  cons1_c = ctypes.c_char_p(cons1)
-  cons2_c = ctypes.c_char_p(cons2)
+    return str(cons, 'utf8')
+  else:
+    return cons
+
+
+def build_consensus_duplex_simple(cons1_raw, cons2_raw, gapped=False):
+  assert len(cons1_raw) == len(cons2_raw)
+  if PY3:
+    cons1_bytes = bytes(cons1_raw, 'utf8')
+    cons2_bytes = bytes(cons2_raw, 'utf8')
+  else:
+    cons1_bytes = cons1_raw
+    cons2_bytes = cons2_raw
+  cons1_c = ctypes.c_char_p(cons1_bytes)
+  cons2_c = ctypes.c_char_p(cons2_bytes)
   if gapped:
     gapped_c = 1
   else:
@@ -149,6 +140,19 @@ def build_consensus_duplex_simple(cons1, cons2, gapped=False):
     return str(cons, 'utf8')
   else:
     return cons
+
+
+def str_pylist_to_str_carray(str_pylist, length=None, encoding='utf8'):
+  if length is None:
+    length = len(str_pylist)
+  str_carray = (ctypes.c_char_p * length)()
+  for i, str_raw in enumerate(align):
+    if PY3:
+      str_bytes = bytes(str_raw, encoding)
+    else:
+      str_bytes = str_raw
+    str_carray[i] = ctypes.c_char_p(str_bytes)
+  return str_carray
 
 
 if __name__ == '__main__':

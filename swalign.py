@@ -48,11 +48,12 @@ class AlignC(ctypes.Structure):
 # The Python version
 class Align(object):
   def __init__(self, align_c):
-    self.target = align_c.seqs.contents.a
-    self.query = align_c.seqs.contents.b
     if PY3:
-      self.target = str(self.target, 'utf8')
-      self.query = str(self.query, 'utf8')
+      self.target = str(align_c.seqs.contents.a, 'utf8')
+      self.query = str(align_c.seqs.contents.b, 'utf8')
+    else:
+      self.target = align_c.seqs.contents.a
+      self.query = align_c.seqs.contents.b
     # Where the first base of the target aligns on the query, in query coordinates (or 1, if <= 0).
     self.start_target = align_c.start_a
     # Where the first base of the query aligns on the target, in target coordinates (or 1, if <= 0).
