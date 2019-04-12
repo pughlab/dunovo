@@ -51,7 +51,7 @@ def get_consensus(align, quals=[], cons_thres=-1.0, min_reads=0, qual_thres=' ',
   if PY3:
     qual_thres_val = ord(qual_thres)
   else:
-    qual_thres_val = qual_thres
+    qual_thres_val = bytes(qual_thres)
   qual_thres_c = ctypes.c_char(qual_thres_val)
   n_seqs = len(align)
   if gapped:
@@ -77,7 +77,7 @@ def get_consensus(align, quals=[], cons_thres=-1.0, min_reads=0, qual_thres=' ',
   if PY3:
     return str(cons, 'utf8')
   else:
-    return cons
+    return str(cons)
 
 
 # N.B.: The quality scores must be aligned with their accompanying sequences.
@@ -88,8 +88,8 @@ def get_consensus_duplex(align1, align2, quals1=[], quals2=[], cons_thres=-1.0, 
     method_bytes = bytes(method, 'utf8')
     qual_thres_val = ord(qual_thres)
   else:
-    method_bytes = method
-    qual_thres_val = qual_thres
+    method_bytes = bytes(method)
+    qual_thres_val = bytes(qual_thres)
   qual_thres_c = ctypes.c_char(qual_thres_val)
   cons_thres_c = ctypes.c_double(cons_thres)
   n_seqs1 = len(align1)
@@ -118,17 +118,18 @@ def get_consensus_duplex(align1, align2, quals1=[], quals2=[], cons_thres=-1.0, 
   if PY3:
     return str(cons, 'utf8')
   else:
-    return cons
+    return str(cons)
 
 
 def build_consensus_duplex_simple(cons1_raw, cons2_raw, gapped=False):
-  assert len(cons1_raw) == len(cons2_raw)
+  assert len(cons1_raw) == len(cons2_raw), ('Consensus sequences have different lengths:\n'
+                                            '  {}\n  {}'.format(cons1_raw, cons2_raw))
   if PY3:
     cons1_bytes = bytes(cons1_raw, 'utf8')
     cons2_bytes = bytes(cons2_raw, 'utf8')
   else:
-    cons1_bytes = cons1_raw
-    cons2_bytes = cons2_raw
+    cons1_bytes = bytes(cons1_raw)
+    cons2_bytes = bytes(cons2_raw)
   cons1_c = ctypes.c_char_p(cons1_bytes)
   cons2_c = ctypes.c_char_p(cons2_bytes)
   if gapped:
@@ -139,7 +140,7 @@ def build_consensus_duplex_simple(cons1_raw, cons2_raw, gapped=False):
   if PY3:
     return str(cons, 'utf8')
   else:
-    return cons
+    return str(cons)
 
 
 def str_pylist_to_str_carray(str_pylist, length=None, encoding='utf8'):
@@ -150,7 +151,7 @@ def str_pylist_to_str_carray(str_pylist, length=None, encoding='utf8'):
     if PY3:
       str_bytes = bytes(str_raw, encoding)
     else:
-      str_bytes = str_raw
+      str_bytes = bytes(str_raw)
     str_carray[i] = ctypes.c_char_p(str_bytes)
   return str_carray
 

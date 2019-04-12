@@ -22,7 +22,7 @@ def get_revcomp(seq_raw):
   if PY3:
     seq_bytes = bytes(seq_raw, 'utf8')
   else:
-    seq_bytes = seq_raw
+    seq_bytes = bytes(seq_raw)
   return seqtools.get_revcomp(seq_bytes)
 
 
@@ -61,15 +61,15 @@ def transfer_gaps(aligned, seq, gap_char_in='-', gap_char_out='-'):
     gap_char_in_bytes = bytes(gap_char_in, 'utf8')
     gap_char_out_bytes = bytes(gap_char_out, 'utf8')
   else:
-    gap_char_in_bytes = gap_char_in
-    gap_char_out_bytes = gap_char_out
+    gap_char_in_bytes = bytes(gap_char_in)
+    gap_char_out_bytes = bytes(gap_char_out)
   gap_char_in_c = ctypes.c_char(gap_char_in_bytes)
   gap_char_out_c = ctypes.c_char(gap_char_out_bytes)
   seq_aligned = seqtools.transfer_gaps(aligned_c, seq_c, gap_char_in_c, gap_char_out_c)
   if PY3:
     return str(seq_aligned, 'utf8')
   else:
-    return seq_aligned
+    return str(seq_aligned)
 
 
 def transfer_gaps_multi(seqs, aligned, gap_char_in='-', gap_char_out='-'):
@@ -77,8 +77,8 @@ def transfer_gaps_multi(seqs, aligned, gap_char_in='-', gap_char_out='-'):
     gap_char_in_bytes = bytes(gap_char_in, 'utf8')
     gap_char_out_bytes = bytes(gap_char_out, 'utf8')
   else:
-    gap_char_in_bytes = gap_char_in
-    gap_char_out_bytes = gap_char_out
+    gap_char_in_bytes = bytes(gap_char_in)
+    gap_char_out_bytes = bytes(gap_char_out)
   gap_char_in_c = ctypes.c_char(gap_char_in_bytes)
   gap_char_out_c = ctypes.c_char(gap_char_out_bytes)
   n_seqs = len(seqs)
@@ -93,7 +93,7 @@ def transfer_gaps_multi(seqs, aligned, gap_char_in='-', gap_char_out='-'):
     if PY3:
       seq = str(seq_raw, 'utf8')
     else:
-      seq = seq_raw
+      seq = str(seq_raw)
     output.append(seq)
   return output
 
@@ -111,5 +111,5 @@ def pystr_to_cstr(pystr, encoding='utf8'):
   if PY3:
     pystr_bytes = bytes(pystr, encoding)
   else:
-    pystr_bytes = pystr
+    pystr_bytes = bytes(pystr)
   return ctypes.c_char_p(pystr_bytes)

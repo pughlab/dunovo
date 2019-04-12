@@ -52,8 +52,8 @@ class Align(object):
       self.target = str(align_c.seqs.contents.a, 'utf8')
       self.query = str(align_c.seqs.contents.b, 'utf8')
     else:
-      self.target = align_c.seqs.contents.a
-      self.query = align_c.seqs.contents.b
+      self.target = str(align_c.seqs.contents.a)
+      self.query = str(align_c.seqs.contents.b)
     # Where the first base of the target aligns on the query, in query coordinates (or 1, if <= 0).
     self.start_target = align_c.start_a
     # Where the first base of the query aligns on the target, in target coordinates (or 1, if <= 0).
@@ -82,11 +82,14 @@ swalign.smith_waterman.restype = ctypes.POINTER(AlignC)
 swalign.revcomp.restype = ctypes.c_char_p
 
 
-def smith_waterman(target, query):
+def smith_waterman(target_raw, query_raw):
   if PY3:
-    target = bytes(target, 'utf8')
-    query = bytes(query, 'utf8')
-  seq_pair = SeqPairC(target, len(target), query, len(query))
+    target_bytes = bytes(target_raw, 'utf8')
+    query_bytes = bytes(query_raw, 'utf8')
+  else:
+    target_bytes = bytes(target_raw)
+    query_bytes = bytes(query_raw)
+  seq_pair = SeqPairC(target_bytes, len(target_raw), query_bytes, len(query_raw))
   align_c = swalign.smith_waterman(ctypes.pointer(seq_pair), 1).contents
   return Align(align_c)
 
