@@ -8,13 +8,13 @@ import os
 import sys
 import copy
 import errno
+import string
 import random
 import logging
 import argparse
 import collections
 # sys.path hack to access lib package in root directory.
 sys.path.insert(0, os.path.dirname(sys.path[0]))
-sys.path.insert(1, os.path.join(sys.path[1], 'lib'))
 # sys.path hack to allow overriding installed pyBamParser.
 if os.environ.get('PYTHONPATH'):
   sys.path.insert(1, os.environ.get('PYTHONPATH'))
@@ -23,12 +23,19 @@ try:
 except ImportError:
   pass
 from utillib import simplewrap
+from kalign import kalign
 import consensus as consensuslib
+import seqtools
+import swalign
 PY3 = sys.version_info.major >= 3
 
 REVCOMP_MAP = {'a':'t', 'c':'g', 'g':'c', 't':'a', 'r':'y', 'y':'r', 'm':'k', 'k':'m', 'b':'v',
                'd':'h', 'h':'d', 'v':'b', 'A':'T', 'C':'G', 'G':'C', 'T':'A', 'R':'Y', 'Y':'R',
                'M':'K', 'K':'M', 'B':'V', 'D':'H', 'H':'D', 'V':'B'}
+if PY3:
+  IUPAC_TO_N_TABLE = str.maketrans('rymkbdhvRYMKBDHV', 'NNNNNNNNNNNNNNNN')
+else:
+  IUPAC_TO_N_TABLE = string.maketrans('rymkbdhvRYMKBDHV', 'NNNNNNNNNNNNNNNN')
 
 DESCRIPTION = """Tally statistics on errors in reads, compared to their (single-stranded) \
 consensus sequences. Output is one tab-delimited line per single-read alignment (one mate within \
@@ -83,7 +90,10 @@ def make_argparser():
     help='Backward compatibility shorthand for "--out-format errors1".')
   parser.add_argument('-D', '--duplex', action='store_true',
     help='Use the full duplex family to determine the consensus sequence, not just the single-'
-         'stranded family.')
+         'stranded family. In this case, the second output column can be ignored (it will always '
+         'be "ab"). The third column then represents the mate, but the duplex mate, not the input '
+         'mate. The reads for both strands will be aligned to the corresponding duplex consensus '
+         'at once, and errors calculated for the entire alignment.')
   parser.add_argument('-a', '--alignment', dest='human', action='store_true',
     help='Print human-readable output, including a full alignment with consensus bases masked '
          '(to highlight errors).')
@@ -114,13 +124,16 @@ def make_argparser():
   parser.add_argument('-o', '--overlap-stats', type=argparse.FileType('w'),
     help='Write statistics on overlaps and errors in overlaps to this file. Warning: will '
          'overwrite any existing file.')
+  parser.add_argument('-v', '--validate-kalign', action='store_true',
+    help='When using --duplex, check that Kalign is returning aligned sequences in the same order '
+         'they were given.')
   parser.add_argument('-L', '--dedup-log', type=argparse.FileType('w'),
     help='Log overlap error deduplication to this file. Warning: Will overwrite any existing file.')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   parser.add_argument('-S', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
     default=logging.ERROR)
-  parser.add_argument('-v', '--verbose', dest='volume', action='store_const', const=logging.INFO)
+  parser.add_argument('-V', '--verbose', dest='volume', action='store_const', const=logging.INFO)
   parser.add_argument('--debug', dest='volume', action='store_const', const=logging.DEBUG)
 
   return parser
@@ -133,9 +146,6 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
   tone_down_logger()
-
-  if args.duplex:
-    raise NotImplementedError('--duplex not yet supported.')
 
   if args.human and args.out_format == 'errors2':
     fail('Error: --alignment invalid with --out-format errors2.')
@@ -164,25 +174,25 @@ def main(argv):
     if is_double_stranded(family):
       double_strand_families += 1
       if args.duplex:
-        duplex_consensi = get_duplex_consensi(family)
+        transform_to_duplex_family(family, validate=args.validate_kalign)
     else:
       single_strand_families += 1
       if args.duplex:
         continue
     for order in ('ab', 'ba'):
       for mate in (0, 1):
+        if args.duplex and order == 'ba':
+          # Since ab.1 == ba.2 and ab.2 == ba.1 in duplex families, only process ab.
+          # This also means the mate value will still be accurate, meaning the duplex mate.
+          continue
         seq_align = family[order][mate]['seqs']
         qual_align = family[order][mate]['quals']
+        consensus = family[order][mate]['consensus']
         ids = family[order][mate]['ids']
         num_seqs = len(seq_align)
-        if args.duplex:
-          if (order == 'ab' and mate == 0) or (order == 'ba' and mate == 1):
-            consensus = duplex_consensi[0]
-          else:
-            consensus = duplex_consensi[1]
-        else:
-          consensus = family[order][mate]['consensus']
-        error_types = get_family_errors(seq_align, qual_align, consensus, error_qual_thres,
+        # Replace non-"ACGTN-" bases with N, to make it easier to ignore them.
+        consensus_mod = consensus.translate(IUPAC_TO_N_TABLE)
+        error_types = get_family_errors(seq_align, qual_align, consensus_mod, error_qual_thres,
                                         count_indels=args.indels)
         overlap = collections.defaultdict(int)
         family_stat = {'num_seqs':num_seqs, 'consensus':consensus, 'errors':error_types,
@@ -203,6 +213,8 @@ def main(argv):
     for barcode in family_stats:
       for order in ('ab', 'ba'):
         for mate in (0, 1):
+          if args.duplex and order == 'ba':
+            continue
           family_stat = family_stats[barcode][order][mate]
           if family_stat['num_seqs'] < args.min_reads:
             continue
@@ -296,16 +308,60 @@ def add_consensi(family, qual_thres):
 
 
 def get_duplex_consensi(family):
-  cons1 = consensuslib.build_consensus_duplex_simple(family['ab'][0]['consensus'],
-                                                     family['ba'][1]['consensus'], gapped=True)
-  cons2 = consensuslib.build_consensus_duplex_simple(family['ab'][1]['consensus'],
-                                                     family['ba'][0]['consensus'], gapped=True)
-  return [cons1, cons2]
+  consensi = []
+  for (order1, mate1), (order2, mate2) in (('ab', 0), ('ba', 1)), (('ab', 1), ('ba', 0)):
+    alignment = swalign.smith_waterman(family[order1][mate1]['consensus'].replace('-', ''),
+                                       family[order2][mate2]['consensus'].replace('-', ''))
+    consensi.append(consensuslib.build_consensus_duplex_simple(alignment.query, alignment.target))
+  return consensi
 
 
 def is_double_stranded(family):
   return (family['ab'][0]['seqs'] and family['ba'][1]['seqs'] and
           family['ab'][1]['seqs'] and family['ba'][0]['seqs'])
+
+
+def transform_to_duplex_family(family, validate=False):
+  # Get the duplex consensus sequences (mate 1 and 2), and replace the single-strand consensus
+  # sequences with them.
+  duplex_consensi = get_duplex_consensi(family)
+  duplex_mates = ((('ab', 0), ('ba', 1)), (('ab', 1), ('ba', 0)))
+  for mate_num, duplex_mate in enumerate(duplex_mates):
+    for order, mate in duplex_mate:
+      family[order][mate]['consensus'] = duplex_consensi[mate_num]
+  # Realign the reads and quality scores to the duplex consensus sequences.
+  for duplex_mate in duplex_mates:
+    seq_align = []
+    qual_align = []
+    ids = []
+    for order, mate in duplex_mate:
+      seq_align  += family[order][mate]['seqs']
+      qual_align += family[order][mate]['quals']
+      ids += family[order][mate]['ids']
+      consensus = family[order][mate]['consensus']
+    consensus, seq_align, qual_align = realign_family_to_consensus(consensus, seq_align, qual_align,
+                                                                   validate=validate)
+    for order, mate in duplex_mate:
+      family[order][mate]['seqs'] = seq_align
+      family[order][mate]['quals'] = qual_align
+      family[order][mate]['consensus'] = consensus
+      family[order][mate]['ids'] = ids
+
+
+def realign_family_to_consensus(consensus, family, quals, validate=False):
+  unaligned_seqs = [consensus]
+  unaligned_seqs.extend([seq.replace('-', '') for seq in family])
+  aligned_seqs = kalign.align(unaligned_seqs)
+  if validate:
+    for input, output in zip(unaligned_seqs, aligned_seqs):
+      assert input == output.replace('-', ''), (
+        "Kalign may have returned sequences in a different order than they were given. Failed on "
+        "sequence: {}".format(input)
+      )
+  aligned_consensus = aligned_seqs[0]
+  aligned_family = aligned_seqs[1:]
+  aligned_quals = seqtools.transfer_gaps_multi(quals, aligned_family, gap_char_out=' ')
+  return aligned_consensus, aligned_family, aligned_quals
 
 
 def get_gc_content(seq):
@@ -366,10 +422,10 @@ def print_overlap_stats(barcode, order, mate, stats_fh, stats):
   stats_fh.write('\t'.join(map(str, columns))+'\n')
 
 
-def get_alignment_errors(consensus_seq, seq_align, qual_align, qual_thres, count_indels=False):
+def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_indels=False):
   qual_thres_char = chr(qual_thres+32)
   errors = []
-  for coord, (cons_base, bases, quals) in enumerate(zip(consensus_seq, zip(*seq_align), zip(*qual_align))):
+  for coord, (cons_base, bases, quals) in enumerate(zip(consensus, zip(*seq_align), zip(*qual_align))):
     for seq_num, (base, qual) in enumerate(zip(bases, quals)):
       if base != cons_base and cons_base != 'N' and qual >= qual_thres_char:
         # Mismatch between the read and consensus, and quality is above the threshold.
