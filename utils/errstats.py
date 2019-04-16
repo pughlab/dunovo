@@ -32,10 +32,13 @@ PY3 = sys.version_info.major >= 3
 REVCOMP_MAP = {'a':'t', 'c':'g', 'g':'c', 't':'a', 'r':'y', 'y':'r', 'm':'k', 'k':'m', 'b':'v',
                'd':'h', 'h':'d', 'v':'b', 'A':'T', 'C':'G', 'G':'C', 'T':'A', 'R':'Y', 'Y':'R',
                'M':'K', 'K':'M', 'B':'V', 'D':'H', 'H':'D', 'V':'B'}
+
 if PY3:
-  IUPAC_TO_N_TABLE = str.maketrans('rymkbdhvRYMKBDHV', 'NNNNNNNNNNNNNNNN')
+  trans_fxn = str.maketrans
 else:
-  IUPAC_TO_N_TABLE = string.maketrans('rymkbdhvRYMKBDHV', 'NNNNNNNNNNNNNNNN')
+  trans_fxn = string.maketrans
+IUPAC_TO_N_TABLE = trans_fxn('rymkbdhvRYMKBDHV', 'NNNNNNNNNNNNNNNN')
+REVCOMP_TABLE = trans_fxn('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
 
 DESCRIPTION = """Tally statistics on errors in reads, compared to their (single-stranded) \
 consensus sequences. Output is one tab-delimited line per single-read alignment (one mate within \
@@ -431,7 +434,7 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
         # Mismatch between the read and consensus, and quality is above the threshold.
         if count_indels or (base != '-' and cons_base != '-'):
           # Either it's not an indel, or we're counting indels.
-          errors.append((seq_num, coord+1, base))
+          errors.append({'seq':seq_num, 'coord':coord+1, 'alt':base})
   return errors
 
 
@@ -439,8 +442,9 @@ def group_errors(errors):
   """Group errors by coordinate and base."""
   last_error = None
   current_types = []
-  for error in sorted(errors, key=lambda error: error[1]):
-    if last_error is not None and last_error[1] == error[1] and last_error[2] == error[2]:
+  for error in sorted(errors, key=lambda error: error['coord']):
+    if (last_error is not None and last_error['coord'] == error['coord'] and
+        last_error['alt'] == error['alt']):
       current_types.append(error)
     else:
       if current_types:
@@ -460,7 +464,7 @@ def tally_errors(error_types, num_seqs):
     if len(error_type) > 1:
       repeated_errors += 1
     for error in error_type:
-      errors_per_seq[error[0]] += 1
+      errors_per_seq[error['seq']] += 1
   return errors_per_seq, repeated_errors, error_repeat_counts
 
 
@@ -468,10 +472,8 @@ def mask_alignment(seq_alignment, error_types):
   masked_alignment = [['.'] * len(seq) for seq in seq_alignment]
   for error_type in error_types:
     for error in error_type:
-      seq_num = error[0]
-      coord = error[1]
-      base = error[2]
-      masked_alignment[seq_num][coord-1] = base
+      if 'type' not in error or error['type'] == 'SNV':
+        masked_alignment[error['seq']][error['coord']-1] = error['alt']
   return [''.join(seq) for seq in masked_alignment]
 
 
@@ -539,6 +541,7 @@ def get_read_identifiers(read):
 
 def dedup_pair(pair, pair_stats, dedup_log=None):
   """We've gathered a pair of reads and the errors in them. Now correlate the data between them."""
+  #TODO: Make this work for indels.
   dedup_log and dedup_log.write('{} ({} read pairs)\n'.format(pair[0].get_read_name(),
                                                               pair_stats[0]['num_seqs']))
   edges = get_edges(pair)
@@ -574,16 +577,19 @@ def convert_pair_errors(pair, pair_stats):
     error_types = pair_stats[mate]['errors']
     for i, error_type in enumerate(error_types):
       error = error_type[0]
-      read_coord = error[1]
+      if 'type' in error and error['type'] != 'SNV':
+        #TODO: Make indel-compatible.
+        continue
+      read_coord = error['coord']
       if read.is_seq_reverse_complement():
-        base = REVCOMP_MAP[error[2]]
+        alt = get_revcomp(error['alt'])
       else:
-        base = error[2]
+        alt = error['alt']
       ref_coord = read.to_ref_coord(read_coord)
       if ref_coord is None:
         nonref_errors[mate].append(error_type)
       else:
-        errors_by_ref_coord[mate][(ref_coord+1, base)] = error_type
+        errors_by_ref_coord[mate][(ref_coord+1, alt)] = error_type
   return errors_by_ref_coord, nonref_errors
 
 
@@ -610,10 +616,10 @@ def null_duplicate_errors(errors_by_ref_coord, pair_stats, dedup_log=None):
   errors1 = set(errors_by_ref_coord[0].keys())
   errors2 = set(errors_by_ref_coord[1].keys())
   all_errors = list(errors1.union(errors2))
-  for ref_coord, base in sorted(all_errors):
+  for ref_coord, alt in sorted(all_errors):
     these_error_types = [None, None]
     for mate in (0, 1):
-      error_type = errors_by_ref_coord[mate].get((ref_coord, base))
+      error_type = errors_by_ref_coord[mate].get((ref_coord, alt))
       these_error_types[mate] = error_type
     if these_error_types[0] and these_error_types[1]:
       # The same error occurred at the same position in both reads. Keep only one of them.
@@ -622,8 +628,8 @@ def null_duplicate_errors(errors_by_ref_coord, pair_stats, dedup_log=None):
       pair_stats[0]['overlap']['duplicates'] += 1
       pair_stats[1]['overlap']['duplicates'] += 1
       dedup_log and dedup_log.write('omitting error {} {} from mate {}\n'
-                                    .format(ref_coord, base, mate+1))
-    dedup_log and dedup_log.write('{:5d} {:1s}:  '.format(ref_coord, base))
+                                    .format(ref_coord, alt, mate+1))
+    dedup_log and dedup_log.write('{:5d} {:1s}:  '.format(ref_coord, alt))
     for mate in (0, 1):
       if dedup_log:
         error_type = these_error_types[mate]
@@ -641,7 +647,7 @@ def log_nonref_errors(nonref_errors, dedup_log):
   for mate in (0, 1):
     for error_type in nonref_errors[mate]:
       error = error_type[0]
-      dedup_log.write('{:5d} {:1s}:  '.format(error[1], error[2]))
+      dedup_log.write('{:5d} {:1s}:  '.format(error['coord'], error['alt']))
       if mate == 1:
         dedup_log.write('             ')
       dedup_log.write('  {:2d} errors\n'.format(len(error_type)))
@@ -681,6 +687,14 @@ def get_overlap_len(edges):
   for mate in (0, 1):
     non_overlap_lens[mate] = edges[mate]['end'] - edges[mate]['start'] + 1 - overlap_len
   return overlap_len, non_overlap_lens
+
+
+def get_revcomp(seq_or_alt):
+  if hasattr(seq_or_alt, 'translate'):
+    return seq_or_alt.translate(REVCOMP_TABLE)[::-1]
+  else:
+    # If it's not a string, it might be an integer (deletion length). Return this unchanged.
+    return seq_or_alt
 
 
 def tone_down_logger():
