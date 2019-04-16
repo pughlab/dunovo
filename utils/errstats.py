@@ -427,14 +427,54 @@ def print_overlap_stats(barcode, order, mate, stats_fh, stats):
 
 def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_indels=False):
   qual_thres_char = chr(qual_thres+32)
+  num_seqs = len(seq_align)
   errors = []
+  last_bases = [None] * num_seqs
+  running_indels = [None] * num_seqs
   for coord, (cons_base, bases, quals) in enumerate(zip(consensus, zip(*seq_align), zip(*qual_align))):
     for seq_num, (base, qual) in enumerate(zip(bases, quals)):
-      if base != cons_base and cons_base != 'N' and qual >= qual_thres_char:
+      #TODO: Figure out how to deal with quality scores for indels and consensus N's.
+      if base != cons_base:
         # Mismatch between the read and consensus, and quality is above the threshold.
-        if count_indels or (base != '-' and cons_base != '-'):
-          # Either it's not an indel, or we're counting indels.
-          errors.append({'seq':seq_num, 'coord':coord+1, 'alt':base})
+        if base == '-':
+          # We're in a deletion.
+          if not count_indels:
+            continue
+          running_indel = running_indels[seq_num]
+          if running_indel and running_indel['type'] == 'del':
+            # We were already tracking a deletion.
+            running_indel['alt'] += 1
+          else:
+            # We weren't already tracking a deletion.
+            # Either there was no indel being tracked, or we were tracking an insertion.
+            running_indels[seq_num] = {'type':'del', 'seq':seq_num, 'coord':coord, 'alt':1}
+            if running_indel and running_indel['type'] == 'ins':
+              errors.append(running_indel)
+        elif cons_base == '-':
+          # We're in an insertion.
+          if not count_indels:
+            continue
+          running_indel = running_indels[seq_num]
+          if running_indel and running_indel['type'] == 'ins':
+            # We were already tracking an insertion.
+            running_indel['alt'] += base
+          else:
+            # We weren't already tracking an insertion.
+            # Either there was no indel being tracked, or we were tracking a deletion.
+            running_indels[seq_num] = {'type':'ins', 'seq':seq_num, 'coord':coord, 'alt':base}
+            if running_indel and running_indel['type'] == 'del':
+              errors.append(running_indel)
+        else:
+          # We're in an SNV.
+          if running_indels[seq_num]:
+            # Finish up any indels currently being tracked.
+            errors.append(running_indels[seq_num])
+            running_indels[seq_num] = None
+          if cons_base != 'N' and qual > qual_thres_char:
+            errors.append({'type':'SNV', 'seq':seq_num, 'coord':coord+1, 'alt':base})
+  for indel in running_indels:
+    if indel is not None:
+      errors.append(indel)
   return errors
 
 
