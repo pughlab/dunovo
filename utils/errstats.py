@@ -29,9 +29,6 @@ import seqtools
 import swalign
 PY3 = sys.version_info.major >= 3
 
-REVCOMP_MAP = {'a':'t', 'c':'g', 'g':'c', 't':'a', 'r':'y', 'y':'r', 'm':'k', 'k':'m', 'b':'v',
-               'd':'h', 'h':'d', 'v':'b', 'A':'T', 'C':'G', 'G':'C', 'T':'A', 'R':'Y', 'Y':'R',
-               'M':'K', 'K':'M', 'B':'V', 'D':'H', 'H':'D', 'V':'B'}
 
 if PY3:
   trans_fxn = str.maketrans
@@ -39,6 +36,7 @@ else:
   trans_fxn = string.maketrans
 IUPAC_TO_N_TABLE = trans_fxn('rymkbdhvRYMKBDHV', 'NNNNNNNNNNNNNNNN')
 REVCOMP_TABLE = trans_fxn('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+GAP_WIN_LEN = 4
 
 DESCRIPTION = """Tally statistics on errors in reads, compared to their (single-stranded) \
 consensus sequences. Output is one tab-delimited line per single-read alignment (one mate within \
@@ -476,6 +474,43 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
     if indel is not None:
       errors.append(indel)
   return errors
+
+
+def get_gap_quality_score(quals, indel_coord):
+  """Calculate what should be considered the quality score of the indel.
+  Currently, this is just the simple average of the quality scores of the two bases bookending the
+  indel.
+  This should give the same results as the algorithm in `get_gap_qual()` of consensus.c.
+  `quals` is the quality scores. Gaps should be indicated by a space character.
+  `indel_coord` is any (1-based) coordinate inside the indel (any position where there's a '-')."""
+  left_i = right_i = indel_coord-1
+  while left_i >= 0 and quals[left_i] == ' ':
+    left_i -= 1
+  while right_i < len(quals) and quals[right_i] == ' ':
+    right_i += 1
+  score_sum = 0
+  weight_sum = 0
+  left_weight = right_weight = GAP_WIN_LEN
+  scores = []
+  weights = []
+  while left_weight > 0 or right_weight > 0:
+    if left_weight > 0 and left_i >= 0:
+      if quals[left_i] != ' ':
+        scores.insert(0, ord(quals[left_i]))
+        weights.insert(0, left_weight)
+        score_sum += left_weight * ord(quals[left_i])
+        weight_sum += left_weight
+        left_weight -= 1
+      left_i -= 1
+    if right_weight > 0 and right_i < len(quals):
+      if quals[right_i] != ' ':
+        scores.append(ord(quals[right_i]))
+        weights.append(right_weight)
+        score_sum += right_weight * ord(quals[right_i])
+        weight_sum += right_weight
+        right_weight -= 1
+      right_i += 1
+  return int(round(score_sum/weight_sum))
 
 
 def group_errors(errors):
