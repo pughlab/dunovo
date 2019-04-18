@@ -37,6 +37,7 @@ else:
 IUPAC_TO_N_TABLE = trans_fxn('rymkbdhvRYMKBDHV', 'NNNNNNNNNNNNNNNN')
 REVCOMP_TABLE = trans_fxn('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
 GAP_WIN_LEN = 4
+QUAL_OFFSET = 33 # Sanger
 
 DESCRIPTION = """Tally statistics on errors in reads, compared to their (single-stranded) \
 consensus sequences. Output is one tab-delimited line per single-read alignment (one mate within \
@@ -305,7 +306,8 @@ def add_consensi(family, qual_thres):
     for mate in (0, 1):
       subfamily = family[order][mate]
       subfamily['consensus'] = consensuslib.get_consensus(subfamily['seqs'], subfamily['quals'],
-                                                          qual_thres=chr(qual_thres+32), gapped=True)
+                                                          qual_thres=chr(qual_thres+QUAL_OFFSET),
+                                                          gapped=True)
 
 
 def get_duplex_consensi(family):
@@ -424,7 +426,7 @@ def print_overlap_stats(barcode, order, mate, stats_fh, stats):
 
 
 def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_indels=False):
-  qual_thres_char = chr(qual_thres+32)
+  qual_thres_char = chr(qual_thres+QUAL_OFFSET)
   num_seqs = len(seq_align)
   errors = []
   last_bases = [None] * num_seqs
