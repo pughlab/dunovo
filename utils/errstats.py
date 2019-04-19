@@ -486,17 +486,17 @@ def get_gap_quality_score(quals, indel_coord):
   `quals` is the quality scores. Gaps should be indicated by a space character.
   `indel_coord` is any (1-based) coordinate inside the indel (any position where there's a '-')."""
   left_i = right_i = indel_coord-1
-  while left_i >= 0 and quals[left_i] == ' ':
+  while left_i > 0 and quals[left_i] == ' ':
     left_i -= 1
-  while right_i < len(quals) and quals[right_i] == ' ':
+  while right_i < len(quals)-1 and quals[right_i] == ' ':
     right_i += 1
   score_sum = 0
   weight_sum = 0
   left_weight = right_weight = GAP_WIN_LEN
   scores = []
   weights = []
-  while left_weight > 0 or right_weight > 0:
-    if left_weight > 0 and left_i >= 0:
+  while not (left_i < 0 or left_weight <= 0) or not (right_i >= len(quals) or right_weight <= 0):
+    if left_i >= 0 and left_weight > 0:
       if quals[left_i] != ' ':
         scores.insert(0, ord(quals[left_i]))
         weights.insert(0, left_weight)
@@ -504,7 +504,7 @@ def get_gap_quality_score(quals, indel_coord):
         weight_sum += left_weight
         left_weight -= 1
       left_i -= 1
-    if right_weight > 0 and right_i < len(quals):
+    if right_i < len(quals) and right_weight > 0:
       if quals[right_i] != ' ':
         scores.append(ord(quals[right_i]))
         weights.append(right_weight)
@@ -512,7 +512,10 @@ def get_gap_quality_score(quals, indel_coord):
         weight_sum += right_weight
         right_weight -= 1
       right_i += 1
-  return int(round(score_sum/weight_sum))
+  if weight_sum > 0:
+    return int(round(score_sum/weight_sum)) - QUAL_OFFSET
+  else:
+    return None
 
 
 def group_errors(errors):
