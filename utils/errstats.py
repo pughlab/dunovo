@@ -30,12 +30,17 @@ import swalign
 PY3 = sys.version_info.major >= 3
 
 
-if PY3:
-  trans_fxn = str.maketrans
-else:
-  trans_fxn = string.maketrans
 AMBIGUOUS = set('rymkbdhvswnRYMKBDHVSWN')
-REVCOMP_TABLE = trans_fxn('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+trans_args = ('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+if PY3:
+  REVCOMP_TABLE_BYTES = bytes.maketrans(bytes(trans_args[0], 'utf8'), bytes(trans_args[1], 'utf8'))
+  REVCOMP_TABLE_UNICODE = str.maketrans(*trans_args)
+else:
+  REVCOMP_TABLE_BYTES = string.maketrans(*trans_args)
+  REVCOMP_TABLE_UNICODE = {}
+  for from_char, to_char in zip(*trans_args):
+    REVCOMP_TABLE_UNICODE[ord(from_char)] = ord(to_char)
+
 GAP_WIN_LEN = 4
 QUAL_OFFSET = 33 # Sanger
 
@@ -799,8 +804,10 @@ def get_overlap_len(edges):
 
 
 def get_revcomp(seq_or_alt):
-  if hasattr(seq_or_alt, 'translate'):
-    return seq_or_alt.translate(REVCOMP_TABLE)[::-1]
+  if isinstance(seq_or_alt, bytes):
+    return seq_or_alt.translate(REVCOMP_TABLE_BYTES)[::-1]
+  elif hasattr(seq_or_alt, 'translate'):
+    return seq_or_alt.translate(REVCOMP_TABLE_UNICODE)[::-1]
   else:
     # If it's not a string, it might be an integer (deletion length). Return this unchanged.
     return seq_or_alt
