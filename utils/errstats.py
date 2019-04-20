@@ -34,7 +34,7 @@ if PY3:
   trans_fxn = str.maketrans
 else:
   trans_fxn = string.maketrans
-IUPAC_TO_N_TABLE = trans_fxn('rymkbdhvRYMKBDHV', 'NNNNNNNNNNNNNNNN')
+AMBIGUOUS = set('rymkbdhvswnRYMKBDHVSWN')
 REVCOMP_TABLE = trans_fxn('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
 GAP_WIN_LEN = 4
 QUAL_OFFSET = 33 # Sanger
@@ -192,9 +192,7 @@ def main(argv):
         consensus = family[order][mate]['consensus']
         ids = family[order][mate]['ids']
         num_seqs = len(seq_align)
-        # Replace non-"ACGTN-" bases with N, to make it easier to ignore them.
-        consensus_mod = consensus.translate(IUPAC_TO_N_TABLE)
-        error_types = get_family_errors(seq_align, qual_align, consensus_mod, error_qual_thres,
+        error_types = get_family_errors(seq_align, qual_align, consensus, error_qual_thres,
                                         count_indels=args.indels)
         overlap = collections.defaultdict(int)
         family_stat = {'num_seqs':num_seqs, 'consensus':consensus, 'errors':error_types,
@@ -426,16 +424,29 @@ def print_overlap_stats(barcode, order, mate, stats_fh, stats):
 
 
 def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_indels=False):
+  """Determine errors in sequences in an alignment by comparing to a consensus.
+  Uses VCF notation for indels: coordinate is that of the base before the indel starts.
+  Can't handle complex mutants. Sees them as consecutive SNVs.
+  Can handle ambiguous bases in the consensus, but not the alignment.
+  """
   qual_thres_char = chr(qual_thres+QUAL_OFFSET)
   num_seqs = len(seq_align)
+  if count_indels:
+    qual_align = [fill_in_gap_quals(quals) for quals in qual_align]
   errors = []
   last_bases = [None] * num_seqs
   running_indels = [None] * num_seqs
   for coord, (cons_base, bases, quals) in enumerate(zip(consensus, zip(*seq_align), zip(*qual_align))):
     for seq_num, (base, qual) in enumerate(zip(bases, quals)):
       #TODO: Figure out how to deal with quality scores for indels and consensus N's.
-      if base != cons_base:
-        # Mismatch between the read and consensus, and quality is above the threshold.
+      if base == cons_base or qual <= qual_thres_char or cons_base in AMBIGUOUS:
+        # No mismatch, or not enough information to say there's a mismatch.
+        if running_indels[seq_num]:
+          # Finish up any indels currently being tracked.
+          errors.append(running_indels[seq_num])
+          running_indels[seq_num] = None
+      else:
+        # Mismatch between the read and consensus.
         if base == '-':
           # We're in a deletion.
           if not count_indels:
@@ -470,12 +481,30 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
             # Finish up any indels currently being tracked.
             errors.append(running_indels[seq_num])
             running_indels[seq_num] = None
-          if cons_base != 'N' and qual > qual_thres_char:
-            errors.append({'type':'SNV', 'seq':seq_num, 'coord':coord+1, 'alt':base})
+          errors.append({'type':'SNV', 'seq':seq_num, 'coord':coord+1, 'alt':base})
   for indel in running_indels:
     if indel is not None:
       errors.append(indel)
   return errors
+
+
+def fill_in_gap_quals(quals):
+  """Replace the spaces (' ') in quality scores with gap quality scores."""
+  new_quals = ''
+  i = 0
+  while i < len(quals):
+    if quals[i] == ' ':
+      qual_score = get_gap_quality_score(quals, i+1)
+      if qual_score is None:
+        raise ValueError('No gap quality score could be obtained for {!r}.'.format(quals))
+      qual = chr(qual_score+QUAL_OFFSET)
+      while i < len(quals) and quals[i] == ' ':
+        i += 1
+        new_quals += qual
+    else:
+      new_quals += quals[i]
+      i += 1
+  return new_quals
 
 
 def get_gap_quality_score(quals, indel_coord):

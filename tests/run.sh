@@ -27,6 +27,8 @@ function main {
           list_active_tests >&2
           echo "Inactive tests:" >&2
           list_inactive_tests >&2
+          echo "Unit tests:" >&2
+          echo "  unit" >&2
           exit 1;;
         -p)
           cmd_prefix=;;
@@ -116,6 +118,16 @@ function list_meta_tests {
   done < <(declare -F)
 }
 
+
+function unit {
+  unit_tests
+}
+
+function unit_tests {
+  echo -e "\tUnit Tests"
+  "$dirname/unit-tests.py"
+}
+
 # Capture a list of all functions defined before the tests, to tell which are actual functions
 # and which are tests.
 initial_declarations=$(declare -F)
@@ -133,6 +145,7 @@ function active {
   for test in $(list_active_tests); do
     $test
   done
+  unit
 }
 
 function inactive {
