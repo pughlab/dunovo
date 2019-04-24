@@ -379,13 +379,14 @@ function errstats_indels {
 all_declarations_minus_inactive=$(declare -F)
 
 function errstats_overlap {
-  echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: families.overlap.msa.tsv"
+  # Note: Currently, the correct PYBAMPATH is ~/bx/code/indels/pyBamParser/hg/lib.
+  echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: overlap.families.msa.tsv"
   if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
-  "${local_prefix}errstats.py" --dedup --min-reads 3 --bam "$dirname/families.overlap.sscs.bam" \
-    "$dirname/families.overlap.msa.tsv" --overlap-stats "$dirname/overlaps.tmp.tsv" >/dev/null
-  diff -s "$dirname/overlaps.tmp.tsv" "$dirname/families.overlap.overlaps.expected.tsv"
-  if [[ -f "$dirname/overlaps.tmp.tsv" ]]; then
-    rm "$dirname/overlaps.tmp.tsv"
+  "${local_prefix}errstats.py" --dedup --min-reads 3 --bam "$dirname/overlap.sscs.bam" \
+    "$dirname/overlap.families.msa.tsv" --overlap-stats "$dirname/overlap.overlaps.tmp.tsv" >/dev/null
+  diff -s "$dirname/overlap.overlaps.tmp.tsv" "$dirname/overlap.overlaps.expected.tsv"
+  if [[ -f "$dirname/overlap.overlaps.tmp.tsv" ]]; then
+    rm "$dirname/overlap.overlaps.tmp.tsv"
   fi
 }
 
