@@ -372,6 +372,20 @@ function errstats_indels {
     | diff -s "$dirname/errstats.indels.errors1.out.tsv" -
   < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format errors1 --no-indels \
     | diff -s "$dirname/errstats.indels.errors1.-I.out.tsv" -
+ }
+
+
+function parse_test_align {
+  echo -e "\t${FUNCNAME[0]}:\tparse-test-align.py ::: overlap.align.txt:"
+  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" tests/parse-test-align.py); then return 1; fi
+  "${local_prefix}parse-test-align.py" --ref "$dirname/overlap.ref.tmp.fa" \
+    --fq1 "$dirname/overlap.sscs.tmp_1.fa" --fq2 "$dirname/overlap.sscs.tmp_2.fa" \
+    "$dirname/overlap.align.txt" >/dev/null
+  for out in overlap.ref.tmp.fa overlap.sscs.tmp_1.fa overlap.sscs.tmp_2.fa; do
+    expected="$dirname/$(echo "$out" | sed -E 's/\.tmp//')"
+    diff -s "$dirname/$expected" "$dirname/$out"
+    rm "$dirname/$out"
+  done
 }
 
 

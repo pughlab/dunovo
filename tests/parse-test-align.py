@@ -25,9 +25,10 @@ def make_argparser():
     help='Write the first-mate reads to this fastq file. Warning: will overwrite any existing file.')
   parser.add_argument('-r', '--ref', type=argparse.FileType('w'),
     help='Write the reference sequence to this file. Warning: will overwrite any existing file.')
-  parser.add_argument('-b', '--bar-len', type=int, default=12)
-  parser.add_argument('-c', '--const-len', type=int, default=5)
-  parser.add_argument('-q', '--default-qual', type=int, default=40)
+  parser.add_argument('-c', '--const', default='TACGT',
+    help='Default: %(default)s')
+  parser.add_argument('-q', '--default-qual', type=int, default=40,
+    help='Default: %(default)s')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   parser.add_argument('-Q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
@@ -45,8 +46,6 @@ def main(argv):
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
   tone_down_logger()
 
-  const = rand_seq(args.const_len)
-
   qual_char = chr(args.default_qual+32)
 
   if args.fq1 and args.fq2:
@@ -54,40 +53,51 @@ def main(argv):
   else:
     fq_files = []
 
+  barlen = None
+
   ref_seq = None
   family_num = 0
   pair_num = 0
   first_mate = None
-  last_family_char = None
+  last_barcode = None
   for line_raw in args.alignment:
-    prefix = line_raw[:3]
-    line = line_raw[3:].rstrip()
+    if line_raw.startswith('#'):
+      continue
+    prefix = line_raw.split()[0]
+    line = line_raw[len(prefix):].rstrip()
     if not line:
       continue
-    if prefix[0] == 'f':
-      ref_seq = line
+    if prefix.startswith('f'):
+      raw_ref_seq = line.lstrip()
       if args.ref:
+        ref_seq = raw_ref_seq.replace('-', '')
         args.ref.write('>ref\n')
         args.ref.write(ref_seq+'\n')
-    elif prefix[0] == 'r':
-      assert ref_seq is not None, line_raw
+    elif prefix.startswith('r'):
+      assert raw_ref_seq is not None, line_raw
       mate = int(prefix[1])
       if first_mate is None:
         first_mate = mate
-      family_char = prefix[2]
-      if family_char != last_family_char:
+      barcode = prefix[2:]
+      if barcode != last_barcode:
         family_num += 1
         pair_num = 0
+        if barlen is not None and barlen != len(barcode):
+          fail('Error: Variable barcode lengths encountered. Barcode {!r} length != {}.'
+               .format(barcode, barlen))
+        barlen = len(barcode)
       if mate == first_mate:
         pair_num += 1
       raw_seq, pos, direction = get_raw_seq(line)
-      barcodes = get_barcodes(family_num, args.bar_len)
-      final_seq = substitute_ref_bases(raw_seq, pos, ref_seq)
+      tags = (barcode[:barlen//2], barcode[barlen//2:])
+      final_seq = substitute_ref_bases(raw_seq, pos, raw_ref_seq)
       if fq_files:
-        for line in format_read(final_seq, direction, mate, family_num, pair_num, barcodes, const,
+        for line in format_read(final_seq, direction, mate, family_num, pair_num, tags, args.const,
                                 qual_char):
           fq_files[mate-1].write(line+'\n')
-      last_family_char = family_char
+      last_barcode = barcode
+
+  print(barlen)
 
 
 def get_raw_seq(line):
@@ -95,11 +105,11 @@ def get_raw_seq(line):
   seq = line.lstrip(' ')
   if seq.endswith('+'):
     direction = 'forward'
-    seq = seq.rstrip('+')
+    seq = seq[:-1]
     pos = len(line) - len(seq)
   elif seq.startswith('-'):
     direction = 'reverse'
-    seq = seq.lstrip('-')
+    seq = seq[1:]
     pos = len(line) - len(seq) + 1
   else:
     fail('A +/- direction is required at the 3\' end of the read.')
@@ -111,21 +121,15 @@ def substitute_ref_bases(raw_seq, pos, ref_seq):
   final_seq = ''
   for i, raw_char in enumerate(raw_seq):
     if raw_char == '.':
-      final_seq += ref_seq[pos+i-1]
-    else:
+      ref_char = ref_seq[pos+i-1]
+      if ref_char != '-':
+        final_seq += ref_char
+    elif raw_char != '-':
       final_seq += raw_char
   return final_seq
 
 
-def get_barcodes(family_num, bar_len):
-  random.seed(family_num)
-  barcodes = []
-  for i in range(2):
-    barcodes.append(rand_seq(bar_len))
-  return barcodes
-
-
-def format_read(seq, direction, mate, family_num, pair_num, barcodes, const, qual_char):
+def format_read(seq, direction, mate, family_num, pair_num, tags, const, qual_char):
   # Read name (line 1):
   if (direction == 'forward' and mate == 1) or (direction == 'reverse' and mate == 2):
     order = 'ab'
@@ -134,18 +138,18 @@ def format_read(seq, direction, mate, family_num, pair_num, barcodes, const, qua
   yield '@fam{}.{}.pair{} mate{}'.format(family_num, order, pair_num, mate)
   # Read sequence (line 2):
   if order == 'ab':
-    barcodes_ordered = barcodes
+    tags_ordered = tags
   if order == 'ba':
-    barcodes_ordered = list(reversed(barcodes))
-  barcode = barcodes_ordered[mate-1]
+    tags_ordered = list(reversed(tags))
+  tag = tags_ordered[mate-1]
   if direction == 'reverse':
-    yield barcode + const + revcomp(seq)
+    yield tag + const + revcomp(seq)
   else:
-    yield barcode + const + seq
+    yield tag + const + seq
   # Plus (line 3):
   yield '+'
   # Quality scores (line 4):
-  read_len = len(barcode + const + seq)
+  read_len = len(tag + const + seq)
   yield qual_char * read_len
 
 
