@@ -29,6 +29,8 @@ def make_argparser():
     help='Default: %(default)s')
   parser.add_argument('-q', '--default-qual', type=int, default=40,
     help='Default: %(default)s')
+  parser.add_argument('-B', '--print-barlen', action='store_true',
+    help='Print the detected lenght of the barcodes to stdout.')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   parser.add_argument('-Q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
@@ -67,7 +69,7 @@ def main(argv):
     line = line_raw[len(prefix):].rstrip()
     if not line:
       continue
-    if prefix.startswith('f'):
+    if ref_seq is None and prefix.startswith('f'):
       raw_ref_seq = line.lstrip()
       if args.ref:
         ref_seq = raw_ref_seq.replace('-', '')
@@ -97,7 +99,8 @@ def main(argv):
           fq_files[mate-1].write(line+'\n')
       last_barcode = barcode
 
-  print(barlen)
+  if args.print_barlen:
+    print(barlen)
 
 
 def get_raw_seq(line):
