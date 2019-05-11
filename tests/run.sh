@@ -364,16 +364,17 @@ function errstats_simple {
 function errstats_indels {
   echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: families.unequal.msa.tsv:"
   if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
-  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format reads \
+  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format reads --mate1 \
     | diff -s "$dirname/errstats.indels.reads.out.tsv" -
-  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format reads --no-indels \
+  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format reads --mate1 \
+      --no-indels \
     | diff -s "$dirname/errstats.indels.reads.-I.out.tsv" -
-  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format errors1 \
+  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format errors1 --mate1 \
     | diff -s "$dirname/errstats.indels.errors1.out.tsv" -
-  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format errors1 --no-indels \
+  < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format errors1 --mate1 \
+      --no-indels \
     | diff -s "$dirname/errstats.indels.errors1.-I.out.tsv" -
- }
-
+}
 
 function parse_test_align {
   echo -e "\t${FUNCNAME[0]}:\tparse-test-align.py ::: overlap.align.txt:"
