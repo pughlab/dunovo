@@ -6,6 +6,8 @@
 *.tsv
 *.gz
 *.bak
+*.bai
+*.fai
 .venv
 test.*
 misc
