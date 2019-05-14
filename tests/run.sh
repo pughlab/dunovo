@@ -346,6 +346,37 @@ function filt {
     | diff -s "$dirname/filter.-r5.out.tsv" -
 }
 
+function parse_test_align {
+  echo -e "\t${FUNCNAME[0]}:\tparse-test-align.py ::: overlap.align.txt:"
+  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" tests/parse-test-align.py); then return 1; fi
+  "${local_prefix}parse-test-align.py" --ref "$dirname/overlap.ref.tmp.fa" \
+    --fq1 "$dirname/overlap.reads.tmp_1.fq" --fq2 "$dirname/overlap.reads.tmp_2.fq" \
+    "$dirname/overlap.align.txt" >/dev/null
+  for out in overlap.ref.tmp.fa overlap.reads.tmp_1.fq overlap.reads.tmp_2.fq; do
+    expected=$(echo "$out" | sed -E 's/\.tmp//')
+    diff -s "$dirname/$expected" "$dirname/$out"
+    if [[ -f "$dirname/$out" ]]; then
+      rm "$dirname/$out"
+    fi
+  done
+}
+
+function errstats_overlap {
+  # Note: Currently, the correct PYBAMPATH is ~/bx/code/indels/pyBamParser/hg/lib.
+  echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: overlap.families.msa.tsv"
+  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
+  "${local_prefix}errstats.py" --dedup --min-reads 3 --bam "$dirname/overlap.sscs.bam" \
+    "$dirname/overlap.families.msa.tsv" --overlap-stats "$dirname/overlap.overlaps.tmp.tsv" >/dev/null
+  diff -s "$dirname/overlap.overlaps.tmp.tsv" "$dirname/overlap.overlaps.expected.tsv"
+  if [[ -f "$dirname/overlap.overlaps.tmp.tsv" ]]; then
+    rm "$dirname/overlap.overlaps.tmp.tsv"
+  fi
+}
+
+
+# All tests below here are considered inactive.
+all_declarations_minus_inactive=$(declare -F)
+
 function errstats_simple {
   echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: families.msa.tsv:"
   if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
@@ -374,37 +405,6 @@ function errstats_indels {
   < "$dirname/families.unequal.msa.tsv" "${local_prefix}errstats.py" --out-format errors1 --mate1 \
       --no-indels \
     | diff -s "$dirname/errstats.indels.errors1.-I.out.tsv" -
-}
-
-function parse_test_align {
-  echo -e "\t${FUNCNAME[0]}:\tparse-test-align.py ::: overlap.align.txt:"
-  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" tests/parse-test-align.py); then return 1; fi
-  "${local_prefix}parse-test-align.py" --ref "$dirname/overlap.ref.tmp.fa" \
-    --fq1 "$dirname/overlap.reads.tmp_1.fq" --fq2 "$dirname/overlap.reads.tmp_2.fq" \
-    "$dirname/overlap.align.txt" >/dev/null
-  for out in overlap.ref.tmp.fa overlap.reads.tmp_1.fq overlap.reads.tmp_2.fq; do
-    expected=$(echo "$out" | sed -E 's/\.tmp//')
-    diff -s "$dirname/$expected" "$dirname/$out"
-    if [[ -f "$dirname/$out" ]]; then
-      rm "$dirname/$out"
-    fi
-  done
-}
-
-
-# All tests below here are considered inactive.
-all_declarations_minus_inactive=$(declare -F)
-
-function errstats_overlap {
-  # Note: Currently, the correct PYBAMPATH is ~/bx/code/indels/pyBamParser/hg/lib.
-  echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: overlap.families.msa.tsv"
-  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
-  "${local_prefix}errstats.py" --dedup --min-reads 3 --bam "$dirname/overlap.sscs.bam" \
-    "$dirname/overlap.families.msa.tsv" --overlap-stats "$dirname/overlap.overlaps.tmp.tsv" >/dev/null
-  diff -s "$dirname/overlap.overlaps.tmp.tsv" "$dirname/overlap.overlaps.expected.tsv"
-  if [[ -f "$dirname/overlap.overlaps.tmp.tsv" ]]; then
-    rm "$dirname/overlap.overlaps.tmp.tsv"
-  fi
 }
 
 # utility function for all make-consensi.py tests

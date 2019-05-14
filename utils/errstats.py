@@ -16,8 +16,10 @@ import collections
 # sys.path hack to access lib package in root directory.
 sys.path.insert(0, os.path.dirname(sys.path[0]))
 # sys.path hack to allow overriding installed pyBamParser.
-if os.environ.get('PYTHONPATH'):
-  sys.path.insert(1, os.environ.get('PYTHONPATH'))
+for key in 'PYBAMPATH', 'PYTHONPATH':
+  if os.environ.get(key):
+    sys.path.insert(1, os.environ.get(key))
+    break
 try:
   import pyBamParser.bam
 except ImportError:
@@ -28,6 +30,14 @@ import consensus as consensuslib
 import seqtools
 import swalign
 PY3 = sys.version_info.major >= 3
+
+#TODO: Fix deduplication.
+#      Currently, it uses SSCSs aligned to the reference to determine the reference coordinates
+#      of the variants in the raw reads. But if there's an indel in the raw read that doesn't
+#      appear in the consensus, the conversion can be inaccurate, since it can shift the position
+#      of any downstream SNV.
+#      A fix will require actually aligning all the raw reads, or perhaps using the MSA to figure
+#      out how to convert between consensus coordinates and raw read coordinates.
 
 
 AMBIGUOUS = set('rymkbdhvswnRYMKBDHVSWN')
@@ -116,13 +126,17 @@ def make_argparser():
          'used for producing the reads in the bam file, if provided! Default: %(default)s')
   parser.add_argument('-Q', '--qual-errors', action='store_true',
     help='Don\'t count errors with quality scores below the --qual-thres in the error counts.')
-  parser.add_argument('-I', '--no-indels', dest='indels', action='store_false', default=True,
-    help='Don\'t count indels. Note: the indel counting isn\'t good right now. It counts every '
-         'base of the indel as a separate error, so a 3bp deletion counts as 3 errors. '
-         'Default is to count them, for backward compatibility. Some day I may remove this footgun.')
+  parser.add_argument('-I', '--no-indels', dest='indels', action='store_false', default=False,
+    help='Kept for backward compatibility. Currently, indels are always disabled.')
+  #   help='Don\'t count indels. Note: the indel counting isn\'t good right now. It counts every '
+  #        'base of the indel as a separate error, so a 3bp deletion counts as 3 errors. '
+  #        'Default is to count them, for backward compatibility. Some day I may remove this footgun.')
   parser.add_argument('-d', '--dedup', action='store_true',
     help='Figure out whether there is overlap between mates in read pairs and deduplicate errors '
-         'that appear twice because of it. Requires --bam.')
+         'that appear twice because of it. Requires --bam. Currently, this is preliminary and '
+         'error-prone. Specifically, it cannot deduplicate indels, and even for SNVs, indels in '
+         'reads can cause equivalent SNVs to fail to be deduplicated (or, rarely, be erroneously '
+         'deduplicated).')
   parser.add_argument('-b', '--bam',
     help='The final single-stranded consensus reads, aligned to a reference. Used to find overlaps.')
   parser.add_argument('-s', '--seed', type=int, default=0,
@@ -432,8 +446,10 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
   """Determine errors in sequences in an alignment by comparing to a consensus.
   Uses VCF notation for indels: coordinate is that of the base before the indel starts.
   Can't handle complex mutants. Sees them as consecutive SNVs.
-  Can handle ambiguous bases in the consensus, but not the alignment.
-  """
+  Can handle ambiguous bases in the consensus, but not the alignment."""
+  #TODO: Forget indels at the ends of reads. These are just due to left-over bases from internal
+  #      indels: GATTACAGATTACA---
+  #              GATTA---ATTACAGAT
   qual_thres_char = chr(qual_thres+QUAL_OFFSET)
   num_seqs = len(seq_align)
   if count_indels:
@@ -443,7 +459,6 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
   running_indels = [None] * num_seqs
   for coord, (cons_base, bases, quals) in enumerate(zip(consensus, zip(*seq_align), zip(*qual_align))):
     for seq_num, (base, qual) in enumerate(zip(bases, quals)):
-      #TODO: Figure out how to deal with quality scores for indels and consensus N's.
       if base == cons_base or qual <= qual_thres_char or cons_base in AMBIGUOUS:
         # No mismatch, or not enough information to say there's a mismatch.
         if running_indels[seq_num]:
@@ -556,8 +571,10 @@ def group_errors(errors):
   """Group errors by coordinate and base."""
   last_error = None
   current_types = []
-  for error in sorted(errors, key=lambda error: error['coord']):
-    if (last_error is not None and last_error['coord'] == error['coord'] and
+  for error in sorted(errors, key=lambda error: (error['coord'], error['type'], error['alt'])):
+    if (last_error is not None and
+        last_error['coord'] == error['coord'] and
+        last_error['type'] == error['type'] and
         last_error['alt'] == error['alt']):
       current_types.append(error)
     else:
@@ -586,8 +603,15 @@ def mask_alignment(seq_alignment, error_types):
   masked_alignment = [['.'] * len(seq) for seq in seq_alignment]
   for error_type in error_types:
     for error in error_type:
-      if 'type' not in error or error['type'] == 'SNV':
-        masked_alignment[error['seq']][error['coord']-1] = error['alt']
+      seq_i = error['seq']
+      coord = error['coord']
+      alt = error['alt']
+      if error['type'] == 'SNV':
+        masked_alignment[seq_i][coord-1] = alt
+      elif error['type'] == 'del':
+        masked_alignment[seq_i][coord:coord+alt] = ['-'] * alt
+      elif error['type'] == 'ins':
+        masked_alignment[seq_i][coord:coord+len(alt)] = list(alt)
   return [''.join(seq) for seq in masked_alignment]
 
 
@@ -643,6 +667,8 @@ def dedup_all_errors(bam_path, family_stats, dedup_log):
 def get_read_identifiers(read):
   name = read.get_read_name()
   barcode, order = name.split('.')
+  if not (order in ('ab', 'ba') and 8 <= len(barcode) <= 40):
+    fail('Error: Read name in BAM file does not look like "barcode.order": '+name)
   flags = read.get_flag()
   if flags & 64:
     mate = 0
@@ -699,7 +725,7 @@ def convert_pair_errors(pair, pair_stats):
         alt = get_revcomp(error['alt'])
       else:
         alt = error['alt']
-      ref_coord = read.to_ref_coord(read_coord)
+      ref_coord = read.to_ref_coord(read_coord, one_based=True)
       if ref_coord is None:
         nonref_errors[mate].append(error_type)
       else:
