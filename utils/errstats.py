@@ -126,11 +126,10 @@ def make_argparser():
          'used for producing the reads in the bam file, if provided! Default: %(default)s')
   parser.add_argument('-Q', '--qual-errors', action='store_true',
     help='Don\'t count errors with quality scores below the --qual-thres in the error counts.')
-  parser.add_argument('-I', '--no-indels', dest='indels', action='store_false', default=False,
-    help='Kept for backward compatibility. Currently, indels are always disabled.')
-  #   help='Don\'t count indels. Note: the indel counting isn\'t good right now. It counts every '
-  #        'base of the indel as a separate error, so a 3bp deletion counts as 3 errors. '
-  #        'Default is to count them, for backward compatibility. Some day I may remove this footgun.')
+  parser.add_argument('-I', '--no-indels', dest='indels', action='store_false', default=True,
+    help='Don\'t count indels. Note: the indel counting isn\'t good right now. It counts every '
+         'base of the indel as a separate error, so a 3bp deletion counts as 3 errors. '
+         'Default is to count them, for backward compatibility. Some day I may remove this footgun.')
   parser.add_argument('-d', '--dedup', action='store_true',
     help='Figure out whether there is overlap between mates in read pairs and deduplicate errors '
          'that appear twice because of it. Requires --bam. Currently, this is preliminary and '
@@ -447,9 +446,6 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
   Uses VCF notation for indels: coordinate is that of the base before the indel starts.
   Can't handle complex mutants. Sees them as consecutive SNVs.
   Can handle ambiguous bases in the consensus, but not the alignment."""
-  #TODO: Forget indels at the ends of reads. These are just due to left-over bases from internal
-  #      indels: GATTACAGATTACA---
-  #              GATTA---ATTACAGAT
   qual_thres_char = chr(qual_thres+QUAL_OFFSET)
   num_seqs = len(seq_align)
   if count_indels:
@@ -457,7 +453,10 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
   errors = []
   last_bases = [None] * num_seqs
   running_indels = [None] * num_seqs
+  # Step through the alignment from left to right.
+  # Outer loop is over the columns in the alignment.
   for coord, (cons_base, bases, quals) in enumerate(zip(consensus, zip(*seq_align), zip(*qual_align))):
+    # Inner loop is over the sequences (rows in the alignment).
     for seq_num, (base, qual) in enumerate(zip(bases, quals)):
       if base == cons_base or qual <= qual_thres_char or cons_base in AMBIGUOUS:
         # No mismatch, or not enough information to say there's a mismatch.
@@ -478,7 +477,7 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
           else:
             # We weren't already tracking a deletion.
             # Either there was no indel being tracked, or we were tracking an insertion.
-            running_indels[seq_num] = {'type':'del', 'seq':seq_num, 'coord':coord, 'alt':1}
+            running_indels[seq_num] = {'type':'del', 'seq':seq_num, 'coord':coord, 'alt':1, 'pass':True}
             if running_indel and running_indel['type'] == 'ins':
               errors.append(running_indel)
         elif cons_base == '-':
@@ -492,7 +491,7 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
           else:
             # We weren't already tracking an insertion.
             # Either there was no indel being tracked, or we were tracking a deletion.
-            running_indels[seq_num] = {'type':'ins', 'seq':seq_num, 'coord':coord, 'alt':base}
+            running_indels[seq_num] = {'type':'ins', 'seq':seq_num, 'coord':coord, 'alt':base, 'pass':True}
             if running_indel and running_indel['type'] == 'del':
               errors.append(running_indel)
         else:
@@ -501,10 +500,25 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
             # Finish up any indels currently being tracked.
             errors.append(running_indels[seq_num])
             running_indels[seq_num] = None
-          errors.append({'type':'SNV', 'seq':seq_num, 'coord':coord+1, 'alt':base})
+          errors.append({'type':'SNV', 'seq':seq_num, 'coord':coord+1, 'alt':base, 'pass':True})
+  # Finish remaining indels we've been tracking.
   for indel in running_indels:
     if indel is not None:
       errors.append(indel)
+  # Omit indels at the ends of reads. These are just due to left-over bases  GATTACAGATTACA---
+  # from internal indels. They probably represent reference bases.           GATTACAGATTACA---
+  # But there's no way to tell, so avoid concluding they're indels.          GATTA---ATTACAGAT
+  for error in errors:
+    if error['type'] == 'ins':
+      alt_len = len(error['alt'])
+    elif error['type'] == 'del':
+      alt_len = error['alt']
+    else:
+      continue
+    # print('{seq}/{coord:02d}: {type} {alt} (len {})'.format(alt_len, **error))
+    if error['coord'] + alt_len == len(seq_align[error['seq']]):
+      # The indel runs right up to the end of the sequence. Note to exclude it from counts.
+      error['pass'] = False
   return errors
 
 
@@ -591,6 +605,8 @@ def tally_errors(error_types, num_seqs):
   repeated_errors = 0
   error_repeat_counts = []
   for error_type in error_types:
+    if not error_type[0]['pass']:
+      continue
     error_repeat_counts.append(len(error_type))
     if len(error_type) > 1:
       repeated_errors += 1

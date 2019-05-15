@@ -12,15 +12,15 @@ TCAATGCTCTGAAATCTGTG errors: 0, repeat errors:
 
 ..................... errors: 0
 ..................... errors: 0
-............-.......C errors: 2
+............-.......C errors: 1
 .....C............... errors: 1
-TAAGGATACTAGTATAAGAG- errors: 3, repeat errors: 1, 1, 1
+TAAGGATACTAGTATAAGAG- errors: 2, repeat errors: 1, 1
 
 ..................... errors: 0
 ..................... errors: 0
-.......C.T..........- errors: 3
+.......C.T..........- errors: 2
 ..................... errors: 0
-AGAGTCA-GGTTCGTCTTTAG errors: 3, repeat errors: 1, 1, 1
+AGAGTCA-GGTTCGTCTTTAG errors: 2, repeat errors: 1, 1
 
 .................... errors: 0
 .................... errors: 0
@@ -37,10 +37,10 @@ TAAGGATACTAGTATAAGAG errors: 2, repeat errors: 1, 1
 .............C...... errors: 1
 TCTATCATTATGTTTTGAGG errors: 1, repeat errors: 1
 
-.....-..............C errors: 2
+.....-..............C errors: 1
 ..................... errors: 0
 ..................... errors: 0
-GCCCCCTCTACCCCCTCTAG- errors: 2, repeat errors: 1, 1
+GCCCCCTCTACCCCCTCTAG- errors: 1, repeat errors: 1
 
 .................... errors: 0
 TCGGTTGTTGATGAGATATT errors: 0, repeat errors: 

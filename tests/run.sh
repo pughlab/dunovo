@@ -380,15 +380,15 @@ all_declarations_minus_inactive=$(declare -F)
 function errstats_simple {
   echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: families.msa.tsv:"
   if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
-  "${local_prefix}errstats.py" "$dirname/families.msa.tsv" \
+  "${local_prefix}errstats.py" --mate1 "$dirname/families.msa.tsv" \
     | diff -s "$dirname/errstats.out.tsv" -
-  "${local_prefix}errstats.py" --out-format errors1 "$dirname/families.msa.tsv" \
+  "${local_prefix}errstats.py" --mate1 --out-format errors1 "$dirname/families.msa.tsv" \
     | diff -s "$dirname/errstats.-R.out.tsv" -
   "${local_prefix}errstats.py" --alignment "$dirname/families.msa.tsv" \
     | diff -s "$dirname/errstats.-a.out.tsv" -
   "${local_prefix}errstats.py" --out-format errors1 --alignment "$dirname/families.msa.tsv" \
     | diff -s "$dirname/errstats.-R.-a.out.tsv" -
-  "${local_prefix}errstats.py" --out-format errors2 "$dirname/families.msa.tsv" \
+  "${local_prefix}errstats.py" --mate1 --out-format errors2 "$dirname/families.msa.tsv" \
     | diff -s "$dirname/errstats.errors2.out.tsv" -
 }
 
