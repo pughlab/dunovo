@@ -100,7 +100,9 @@ def make_argparser():
                 'repeats:  Number of unique errors that were observed in more than one read.\n'
                 'errcount: Total number of unique errors in the family.\n'
                 'gc:       GC content of the consensus sequence (0-1 proportion).\n'
-                'ids:      The id of each read in the family (comma-delimited).\n',
+                'ids:      The id of each read in the family (comma-delimited).\n'
+                'bases:    The sum of the sequence lengths of the raw reads (the total number of '
+                          'bases in all the raw reads in the family).\n',
          lspace=12, indent=-10, width_mod=-24))
   parser.add_argument('-v', '--var-columns', choices=('reads', 'errors'), default='reads',
     help=wrap('The content of the variable-number columns at the end of each row.\n'
@@ -245,6 +247,8 @@ def main(argv):
         overlap = collections.defaultdict(int)
         family_stat = {'num_seqs':num_seqs, 'consensus':consensus, 'errors':error_types,
                        'overlap':overlap, 'ids':ids}
+        if 'bases' in columns:
+          family_stat['bases'] = sum_lengths(seq_align)
         if args.dedup:
           family_stats[barcode][order][mate] = family_stat
         elif num_seqs >= args.min_reads:
@@ -427,6 +431,13 @@ def get_family_errors(seq_align, qual_align, consensus, qual_thres, count_indels
   return list(error_types)
 
 
+def sum_lengths(seq_align):
+  bases = 0
+  for read in seq_align:
+    bases += len(read.replace('-', ''))
+  return bases
+
+
 def print_errors(barcode, order, mate, family_stat, var_columns, columns, human=False,
                  seq_align=None, qual_align=None):
   errors_per_seq, repeated_errors, error_repeat_counts = tally_errors(family_stat['errors'],
@@ -454,6 +465,8 @@ def print_errors(barcode, order, mate, family_stat, var_columns, columns, human=
         fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
       elif column == 'errcount':
         fields.append(len(error_repeat_counts))
+      elif column == 'bases':
+        fields.append(family_stat['bases'])
       else:
         fail('Error: Unrecognized --column "{}".'.format(column))
     if var_columns == 'reads':
