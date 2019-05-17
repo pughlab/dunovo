@@ -43,7 +43,8 @@ def get_module_or_shim(module_path):
   try:
     return importlib.import_module(module_path)
   except ImportError:
-    sys.stderr.write('Error importing module '+module_path+'. Some functionality may be missing.\n')
+    sys.stderr.write('Warning: Problem importing module '+module_path+'. '
+                     'Some functionality may be missing.\n')
   module_name = module_path.split('.')[-1]
   try:
     shim = globals()[module_name]
