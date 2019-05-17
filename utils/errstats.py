@@ -63,18 +63,6 @@ The first four output columns are always:
   1. barcode
   2. order
   3. mate (0 or 1)
-  4. number of reads (family size)
-The following columns depend on the argument to --out-format:
---out-format reads (default):
-  5. number of unique errors that were observed in more than one read
-  6-end. number of errors in each read
---out-format errors1 (aka --all-repeats):
-  5-end. count of how many reads each unique error was observed in
---out-format errors2:
-  5. read ids (comma-delimited)
-  6. consensus sequence GC content (0-1 proportion)
-  7. number of unique errors
-  8-end. count of how many reads each unique error was observed in
 
 Format of --overlap-stats is tab-delimited statistics on each mate:
   1. barcode
@@ -94,63 +82,92 @@ def make_argparser():
   # Need to use argparse.RawDescriptionHelpFormatter to preserve formatting in the
   # description of columns in the tsv output. But to still accommodate different
   # terminal widths, dynamic wrapping with simplewrap will be necessary.
-  wrap = simplewrap.Wrapper().wrap
+  wrapper = simplewrap.Wrapper()
+  wrap = wrapper.wrap
   parser = argparse.ArgumentParser(description=wrap(DESCRIPTION),
-                                   formatter_class=argparse.RawDescriptionHelpFormatter)
+                                   formatter_class=argparse.RawTextHelpFormatter)
 
+  wrapper.width -= 24
   parser.add_argument('input', metavar='families.msa.tsv', nargs='?', type=argparse.FileType('r'),
     default=sys.stdin,
-    help='Aligned families (output of align_families.py). Omit to read from stdin.')
-  parser.add_argument('-f', '--out-format', default='reads', choices=('reads', 'errors1', 'errors2'),
-    help='Default: %(default)s')
+    help=wrap('Aligned families (output of align_families.py). Omit to read from stdin.'))
+  parser.add_argument('-c', '--columns', default='famsize,repeats', type=lambda s: s.split(','),
+    help=wrap('The columns to print after the first 3. Give as a comma-delimited list.\n'
+              'Default: %(default)s\n'
+              'Options:')+'\n'+
+         simplewrap.wrap(
+                'famsize:  Number of reads in the family.\n'
+                'repeats:  Number of unique errors that were observed in more than one read.\n'
+                'errcount: Total number of unique errors in the family.\n'
+                'gc:       GC content of the consensus sequence (0-1 proportion).\n'
+                'ids:      The id of each read in the family (comma-delimited).\n',
+         lspace=12, indent=-10, width_mod=-24))
+  parser.add_argument('-v', '--var-columns', choices=('reads', 'errors'), default='reads',
+    help=wrap('The content of the variable-number columns at the end of each row.\n'
+              'Default: %(default)s\n')+'\n'+
+         simplewrap.wrap(
+              'reads:  One column per read: the count of how many errors occurred in the read.\n'
+              'errors: One column per unique error: the count of how many times that error '
+                      'occurred in the family.\n',
+         lspace=10, indent=-8, width_mod=-24))
+  parser.add_argument('-f', '--out-format', choices=('reads', 'errors1', 'errors2'),
+    help=wrap('Shorthand way of specifying the output columns:')+'\n'+
+         simplewrap.wrap(
+                'reads:   --var-columns reads  --columns famsize,repeats\n'
+                'errors1: --var-columns errors --columns famsize\n'
+                'errors2: --var-columns errors --columns famsize,ids,gc,errcount\n',
+         lspace=11, indent=-9, width_mod=-24))
   parser.add_argument('-R', '--all-repeats', dest='out_format', action='store_const', const='errors1',
     help='Backward compatibility shorthand for "--out-format errors1".')
   parser.add_argument('-D', '--duplex', action='store_true',
-    help='Use the full duplex family to determine the consensus sequence, not just the single-'
+    help=wrap('Use the full duplex family to determine the consensus sequence, not just the single-'
          'stranded family. In this case, the second output column can be ignored (it will always '
          'be "ab"). The third column then represents the mate, but the duplex mate, not the input '
          'mate. The reads for both strands will be aligned to the corresponding duplex consensus '
-         'at once, and errors calculated for the entire alignment.')
+         'at once, and errors calculated for the entire alignment.'))
   parser.add_argument('-a', '--alignment', dest='human', action='store_true',
-    help='Print human-readable output, including a full alignment with consensus bases masked '
-         '(to highlight errors).')
+    help=wrap('Print human-readable output, including a full alignment with consensus bases masked '
+         '(to highlight errors).'))
   parser.add_argument('-r', '--min-reads', type=int, default=1,
-    help='Minimum number of reads to form a consensus (and thus get any statistics). '
-         'Default: %(default)s')
+    help=wrap('Minimum number of reads to form a consensus (and thus get any statistics). '
+         'Default: %(default)s'))
   parser.add_argument('-1', '--mate1', dest='mate_offset', action='store_const', default=0, const=1,
-    help='Use 1-based indexing for mate numbering (1 and 2 instead of 0 and 1).')
+    help=wrap('Use 1-based indexing for mate numbering (1 and 2 instead of 0 and 1).'))
   #TODO:
   # parser.add_argument('-c', '--cons-thres', type=float, default=0.5)
   parser.add_argument('-q', '--qual-thres', type=int, default=0,
-    help='PHRED quality score threshold for consensus making. NOTE: This should be the same as was '
-         'used for producing the reads in the bam file, if provided! Default: %(default)s')
+    help=wrap('PHRED quality score threshold for consensus making. NOTE: This should be the same '
+         'as was used for producing the reads in the bam file, if provided! Default: %(default)s'))
   parser.add_argument('-Q', '--qual-errors', action='store_true',
-    help='Don\'t count errors with quality scores below the --qual-thres in the error counts.')
+    help=wrap('Don\'t count errors with quality scores below the --qual-thres in the error counts.'))
   parser.add_argument('-I', '--no-indels', dest='indels', action='store_false', default=True,
-    help='Don\'t count indels. Note: the indel counting isn\'t good right now. It counts every '
-         'base of the indel as a separate error, so a 3bp deletion counts as 3 errors. '
-         'Default is to count them, for backward compatibility. Some day I may remove this footgun.')
+    help=wrap('Don\'t count indels. Note: the indel counting isn\'t good right now. It counts '
+         'every base of the indel as a separate error, so a 3bp deletion counts as 3 errors. '
+         'Default is to count them, for backward compatibility. Some day I may remove this footgun.'))
   parser.add_argument('-d', '--dedup', action='store_true',
-    help='Figure out whether there is overlap between mates in read pairs and deduplicate errors '
-         'that appear twice because of it. Requires --bam. Currently, this is preliminary and '
-         'error-prone. Specifically, it cannot deduplicate indels, and even for SNVs, indels in '
-         'reads can cause equivalent SNVs to fail to be deduplicated (or, rarely, be erroneously '
-         'deduplicated).')
+    help=wrap('Figure out whether there is overlap between mates in read pairs and deduplicate '
+         'errors that appear twice because of it. Requires --bam. Currently, this is preliminary '
+         'and error-prone. Specifically, it cannot deduplicate indels, and even for SNVs, indels '
+         'in reads can cause equivalent SNVs to fail to be deduplicated (or, rarely, be '
+         'erroneously deduplicated).'))
   parser.add_argument('-b', '--bam',
-    help='The final single-stranded consensus reads, aligned to a reference. Used to find overlaps.')
+    help=wrap('The final single-stranded consensus reads, aligned to a reference. Used to find '
+         'overlaps.'))
   parser.add_argument('-s', '--seed', type=int, default=0,
-    help='The random seed. Used to choose which error to keep when deduplicating errors in '
-         'overlaps. Default: %(default)s')
+    help=wrap('The random seed. Used to choose which error to keep when deduplicating errors in '
+         'overlaps. Default: %(default)s'))
   parser.add_argument('-o', '--overlap-stats', type=argparse.FileType('w'),
-    help='Write statistics on overlaps and errors in overlaps to this file. Warning: will '
-         'overwrite any existing file.')
-  parser.add_argument('-v', '--validate-kalign', action='store_true',
-    help='When using --duplex, check that Kalign is returning aligned sequences in the same order '
-         'they were given.')
+    help=wrap('Write statistics on overlaps and errors in overlaps to this file. Warning: will '
+         'overwrite any existing file.'))
+  parser.add_argument('-K', '--validate-kalign', action='store_true',
+    help=wrap('When using --duplex, check that Kalign is returning aligned sequences in the same '
+         'order they were given.'))
   parser.add_argument('-L', '--dedup-log', type=argparse.FileType('w'),
-    help='Log overlap error deduplication to this file. Warning: Will overwrite any existing file.')
+    help=wrap('Log overlap error deduplication to this file. Warning: Will overwrite any existing '
+         'file.'))
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
-    help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
+    help=wrap('Print log messages to this file instead of to stderr. Warning: Will overwrite the '
+         'file.'))
   parser.add_argument('-S', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
     default=logging.ERROR)
   parser.add_argument('-V', '--verbose', dest='volume', action='store_const', const=logging.INFO)
@@ -169,6 +186,19 @@ def main(argv):
 
   if args.human and args.out_format == 'errors2':
     fail('Error: --alignment invalid with --out-format errors2.')
+
+  if args.out_format == 'reads':
+    var_columns = 'reads'
+    columns = ('famsize', 'repeats')
+  elif args.out_format == 'errors1':
+    var_columns = 'errors'
+    columns = ('famsize',)
+  elif args.out_format == 'errors2':
+    var_columns = 'errors'
+    columns = ('famsize', 'ids', 'gc', 'errcount')
+  else:
+    var_columns = args.var_columns
+    columns = args.columns
 
   if args.dedup:
     if not args.bam:
@@ -218,8 +248,8 @@ def main(argv):
         if args.dedup:
           family_stats[barcode][order][mate] = family_stat
         elif num_seqs >= args.min_reads:
-          print_errors(barcode, order, mate+args.mate_offset, family_stat, args.out_format,
-                       args.human, seq_align, qual_align)
+          print_errors(barcode, order, mate+args.mate_offset, family_stat, var_columns,
+                       columns, args.human, seq_align, qual_align)
 
   total = single_strand_families + double_strand_families
   logging.info('Processed {} families: {:0.2f}% single-stranded, {:0.2f}% double-stranded.'
@@ -236,7 +266,7 @@ def main(argv):
           family_stat = family_stats[barcode][order][mate]
           if family_stat['num_seqs'] < args.min_reads:
             continue
-          print_errors(barcode, order, mate+args.mate_offset, family_stat, args.out_format)
+          print_errors(barcode, order, mate+args.mate_offset, family_stat, var_columns, columns)
           if args.overlap_stats:
             print_overlap_stats(barcode, order, mate, args.overlap_stats, family_stat['overlap'])
 
@@ -397,7 +427,7 @@ def get_family_errors(seq_align, qual_align, consensus, qual_thres, count_indels
   return list(error_types)
 
 
-def print_errors(barcode, order, mate, family_stat, out_format, human=False,
+def print_errors(barcode, order, mate, family_stat, var_columns, columns, human=False,
                  seq_align=None, qual_align=None):
   errors_per_seq, repeated_errors, error_repeat_counts = tally_errors(family_stat['errors'],
                                                                       family_stat['num_seqs'])
@@ -405,25 +435,30 @@ def print_errors(barcode, order, mate, family_stat, out_format, human=False,
     masked_alignment = mask_alignment(seq_align, family_stat['errors'])
     for seq, seq_errors in zip(masked_alignment, errors_per_seq):
       print('{} errors: {}'.format(seq, seq_errors))
-    if out_format == 'errors1':
-      print('{} errors: {}, repeat errors: {}\n'.format(family_stat['consensus'],
-                                                        sum(errors_per_seq),
-                                                        ', '.join(map(str, error_repeat_counts))))
-    else:
-      print('{} errors: {}, repeat errors: {}\n'.format(family_stat['consensus'],
-                                                        sum(errors_per_seq),
-                                                        repeated_errors))
+    if var_columns == 'errors':
+      final_stat = ', '.join(map(str, error_repeat_counts))
+    elif var_columns == 'reads':
+      final_stat = repeated_errors
+    print('{} errors: {}, repeat errors: {}\n'
+          .format(family_stat['consensus'], sum(errors_per_seq), final_stat))
   else:
-    fields = [barcode, order, mate, family_stat['num_seqs']]
-    if out_format == 'reads':
-      fields.append(repeated_errors)
+    fields = [barcode, order, mate]
+    for column in columns:
+      if column == 'famsize':
+        fields.append(family_stat['num_seqs'])
+      elif column == 'repeats':
+        fields.append(repeated_errors)
+      elif column == 'ids':
+        fields.append(','.join(family_stat['ids']))
+      elif column == 'gc':
+        fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
+      elif column == 'errcount':
+        fields.append(len(error_repeat_counts))
+      else:
+        fail('Error: Unrecognized --column "{}".'.format(column))
+    if var_columns == 'reads':
       fields.extend(errors_per_seq)
-    elif out_format == 'errors1':
-      fields.extend(error_repeat_counts)
-    elif out_format == 'errors2':
-      fields.append(','.join(family_stat['ids']))
-      fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
-      fields.append(len(error_repeat_counts))
+    elif var_columns == 'errors':
       fields.extend(error_repeat_counts)
     print(*fields, sep='\t')
 

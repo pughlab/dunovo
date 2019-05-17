@@ -370,7 +370,7 @@ function errstats_simple {
     | diff -s "$dirname/errstats.-R.out.tsv" -
   "${local_prefix}errstats.py" --alignment "$dirname/families.msa.tsv" \
     | diff -s "$dirname/errstats.-a.out.tsv" -
-  "${local_prefix}errstats.py" --out-format errors1 --alignment "$dirname/families.msa.tsv" \
+  "${local_prefix}errstats.py" --var-columns errors --alignment "$dirname/families.msa.tsv" \
     | diff -s "$dirname/errstats.-R.-a.out.tsv" -
   "${local_prefix}errstats.py" --mate1 --out-format errors2 "$dirname/families.msa.tsv" \
     | diff -s "$dirname/errstats.errors2.out.tsv" -
