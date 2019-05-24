@@ -5,6 +5,7 @@ if [ x$BASH = x ] || [ ! $BASH_VERSINFO ] || [ $BASH_VERSINFO -lt 4 ]; then
 fi
 set -ue
 
+Project=dunovo
 DefaultChunkMbs=512
 RefdirDefault=refdir
 RequiredCommands='bowtie bowtie-build samtools awk'
@@ -16,27 +17,44 @@ refdir:  The directory to put the reference file (\"barcodes.fa\") and its index
 outfile: Print the output to this path. It will be in SAM format unless the
          path ends in \".bam\". If not given, it will be printed to stdout
          in SAM format.
--R: Don't include reversed barcodes (alpha+beta -> beta+alpha) in the alignment target.
+-R: Don't include reversed barcodes (alpha+beta -> beta+alpha) in the alignment
+    target.
 -t: Number of threads for bowtie and bowtie-build to use (default: 1).
--c: Number to pass to bowtie's --chunkmbs option (default: $DefaultChunkMbs)."
+-c: Number to pass to bowtie's --chunkmbs option (default: $DefaultChunkMbs).
+-p: Report helpful usage data to the developer, to better understand the use
+    cases and performance of the tool. The only data which will be recorded is
+    the name and version of the tool, the size of the input data, the time taken
+    to process it, the IP address of the machine running it, and some
+    performance-related parameters (-t, -c, and the format of the output file).
+    No filenames are sent. All the reporting and recording code is available at
+    https://github.com/NickSto/ET.
+-g: Report the platform as \"galaxy\" when sending usage data."
 
 function main {
 
+  script_dir=$(get_script_dir)
+  version=$(version "$script_dir")
+  start_time=$(date +%s)
+
   # Read in arguments and check them.
   if [[ "$#" -ge 1 ]] && [[ "$1" == '--version' ]]; then
-    version
+    echo "$version"
     return
   fi
 
   threads=1
   reverse=true
   chunkmbs=$DefaultChunkMbs
-  while getopts "rhc:t:v:" opt; do
+  phone=
+  platform_args=
+  while getopts "rhc:t:pgv:" opt; do
     case "$opt" in
       r) reverse='';;
       t) threads=$OPTARG;;
       c) chunkmbs=$OPTARG;;
-      v) version && return;;
+      p) phone='home';;
+      g) platform_args='--platform galaxy';;
+      v) echo "$version" && return;;
       [h?]) fail "$Usage";;
     esac
   done
@@ -44,6 +62,15 @@ function main {
   families=${@:$OPTIND:1}
   refdir=${@:$OPTIND+1:1}
   outfile=${@:$OPTIND+2:1}
+
+  if [[ "$phone" ]] && [[ -x "$script_dir/ET/phone.py" ]]; then
+    #TODO: Use version.py --get-key to read the project from VERSION.
+    set +e
+    run_id=$("$script_dir/ET/phone.py" start --test --insecure --domain test.nstoler.com \
+             --project "$Project" --script "$(basename "$0")" \
+             --version "$version" $platform_args)
+    set -e
+  fi
 
   # Validate arguments.
   if ! [[ $families ]]; then
@@ -105,6 +132,18 @@ function main {
     indexer_threads=
   fi
 
+  if [[ "$phone" ]] && [[ -x "$script_dir/ET/phone.py" ]]; then
+    set +e
+    size=$(du -sb "$families" | awk '{print $1}')
+    run_data="\"format\":\"$format\", \"threads\":\"$threads\", \"chunkmbs\":\"$chunkmbs\",\
+              \"families_size\":\"$size\""
+    "$script_dir/ET/phone.py" prelim --test --insecure --domain test.nstoler.com \
+      --project "$Project" --script "$(basename "$0")" \
+      --version "$version" $platform_args --run-id "$run_id" \
+      --run-data "{$run_data}"
+    set -e
+  fi
+
   echo "\
 families: $families
 refdir:   $refdir
@@ -161,21 +200,41 @@ outbase:  $outbase" >&2
     fi
   fi
   # Check output.
+  success=null
   if [[ $outfile ]]; then
     if [[ -s $outfile ]]; then
       if [[ $format == bam ]] && [[ -e $outbase.sam ]]; then
         rm $outbase.sam
       fi
+      success=true
       echo "Success. Output located in \"$outfile\"." >&2
     else
+      success=false
       fail "Warning: No output file \"$outfile\" found."
     fi
+  fi
+
+  if [[ "$phone" ]] && [[ -x "$script_dir/ET/phone.py" ]]; then
+    set +e
+    now=$(date +%s)
+    run_time=$((now-start_time))
+    "$script_dir/ET/phone.py" end --test --insecure --domain test.nstoler.com \
+      --project "$Project" --script "$(basename "$0")" \
+      --version "$version" $platform_args --run-id "$run_id" --run-time "$run_time" \
+      --run-data "{$run_data, \"success\":$success}"
+    set -e
   fi
 }
 
 function version {
-  script_dir=$(get_script_dir)
-  "$script_dir/utillib/version.py" --config-path "$script_dir/VERSION" --repo-dir "$script_dir"
+  if [[ "$#" -ge 1 ]]; then
+    script_dir="$1"
+  else
+    script_dir=$(get_script_dir)
+  fi
+  if [[ -x "$script_dir/utillib/version.py" ]]; then
+    "$script_dir/utillib/version.py" --config-path "$script_dir/VERSION" --repo-dir "$script_dir"
+  fi
 }
 
 function get_script_dir {
