@@ -391,8 +391,8 @@ def get_family_counts(families_file, limit=None, check_ids=True):
     if limit is not None and read_pairs > limit:
       break
     fields = line.rstrip('\r\n').split('\t')
-    if check_ids and not read_ids_match(fields[2], fields[5]):
-      raise ValueError('Read names "{2}" and "{5}" do not match.'.format(*fields))
+    if check_ids:
+      assert_read_ids_match(fields[2], fields[5])
     barcode = fields[0]
     order = fields[1]
     if barcode != last_barcode:
@@ -408,14 +408,20 @@ def get_family_counts(families_file, limit=None, check_ids=True):
   return family_counts, read_pairs
 
 
-def read_ids_match(name1, name2):
+def assert_read_ids_match(name1, name2):
   id1 = name1.split()[0]
   id2 = name2.split()[0]
   if id1.endswith('/1'):
     id1 = id1[:-2]
   if id2.endswith('/2'):
     id2 = id2[:-2]
-  return id1 == id2
+  if id1 == id2:
+    return True
+  elif id1.endswith('/2') and id2.endswith('/1'):
+    raise ValueError('Read names not as expected. Mate 1 ends with /2 and mate 2 ends with /1:\n'
+                     '  Mate 1: {!r}\n  Mate 2: {!r}'.format(name1, name2))
+  else:
+    raise ValueError('Read names "{}" and "{}" do not match.'.format(name1, name2))
 
 
 def make_correction_table(meta_graph, family_counts, choose_by='count'):

@@ -169,8 +169,8 @@ def main(argv):
         if len(fields) != 8:
           continue
         (this_barcode, this_order, name1, seq1, qual1, name2, seq2, qual2) = fields
-        if args.check_ids and not read_ids_match(name1, name2):
-          raise ValueError('Read names "{}" and "{}" do not match.'.format(name1, name2))
+        if args.check_ids:
+          assert_read_ids_match(name1, name2)
         # If the barcode or order has changed, we're in a new family.
         # Process the reads we've previously gathered as one family and start a new family.
         if this_barcode != barcode or this_order != order:
@@ -270,14 +270,20 @@ def get_run_data(stats, pool, aligner, max_mem=None):
   return run_data
 
 
-def read_ids_match(name1, name2):
+def assert_read_ids_match(name1, name2):
   id1 = name1.split()[0]
   id2 = name2.split()[0]
   if id1.endswith('/1'):
     id1 = id1[:-2]
   if id2.endswith('/2'):
     id2 = id2[:-2]
-  return id1 == id2
+  if id1 == id2:
+    return True
+  elif id1.endswith('/2') and id2.endswith('/1'):
+    raise ValueError('Read names not as expected. Mate 1 ends with /2 and mate 2 ends with /1:\n'
+                     '  Mate 1: {!r}\n  Mate 2: {!r}'.format(name1, name2))
+  else:
+    raise ValueError('Read names "{}" and "{}" do not match.'.format(name1, name2))
 
 
 def process_duplex(duplex, barcode, aligner='mafft'):
