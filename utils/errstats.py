@@ -232,6 +232,11 @@ def main(argv):
   else:
     error_qual_thres = 0
 
+  include_stats = {
+    'bases': 'bases' in columns,
+    'seqs': args.human,
+  }
+
   logging.info('Calculating consensus sequences and counting errors..')
   single_strand_families = double_strand_families = 0
   family_stats = {}
@@ -259,26 +264,19 @@ def main(argv):
           # Since ab.1 == ba.2 and ab.2 == ba.1 in duplex families, only process ab.
           # This also means the mate value will still be accurate, meaning the duplex mate.
           continue
-        # Compare to consensus and find errors.
-        alignment = family[order][mate]
-        num_seqs = len(alignment.seqs)
-        error_types = get_family_errors(alignment.seqs, alignment.quals, alignment.consensus,
-                                        error_qual_thres, count_indels=args.indels)
-        overlap = collections.defaultdict(int)
-        family_stat = {'num_seqs':num_seqs, 'consensus':alignment.consensus, 'errors':error_types,
-                       'overlap':overlap, 'ids':alignment.ids}
-        if 'bases' in columns:
-          family_stat['bases'] = sum_lengths(alignment.seqs)
+        align_stats = get_align_stats(
+          family[order][mate], include_stats, args.indels, error_qual_thres
+        )
         if args.dedup:
-          family_stats[barcode][order][mate] = family_stat
-        elif num_seqs >= args.min_reads:
+          family_stats[barcode][order][mate] = align_stats
+        elif align_stats['num_seqs'] >= args.min_reads:
           if args.human:
             print_errors_human(
-              barcode, order, mate+args.mate_offset, family_stat, var_columns, alignment.seqs
+              barcode, order, mate+args.mate_offset, align_stats, var_columns, align_stats['seqs']
             )
           else:
             print_errors_tsv(
-              barcode, order, mate+args.mate_offset, family_stat, var_columns, columns
+              barcode, order, mate+args.mate_offset, align_stats, var_columns, columns
             )
       #TODO: Deduplicate overlap errors here, using raw read alignments.
 
@@ -294,19 +292,19 @@ def main(argv):
         for mate in (0, 1):
           if args.duplex and order == 'ba':
             continue
-          family_stat = family_stats[barcode][order][mate]
-          if family_stat['num_seqs'] < args.min_reads:
+          align_stats = family_stats[barcode][order][mate]
+          if align_stats['num_seqs'] < args.min_reads:
             continue
           if args.human:
             print_errors_human(
-              barcode, order, mate+args.mate_offset, family_stat, var_columns, alignment.seqs
+              barcode, order, mate+args.mate_offset, align_stats, var_columns, alignment.seqs
             )
           else:
             print_errors_tsv(
-              barcode, order, mate+args.mate_offset, family_stat, var_columns, columns
+              barcode, order, mate+args.mate_offset, align_stats, var_columns, columns
             )
           if args.overlap_stats:
-            print_overlap_stats(barcode, order, mate, args.overlap_stats, family_stat['overlap'])
+            print_overlap_stats(barcode, order, mate, args.overlap_stats, align_stats['overlap'])
 
 
 def parse_families(infile):
@@ -372,6 +370,21 @@ def parse_families(infile):
     family[order][mate].ids.append(read_id)
   family['bar'] = barcode
   yield family
+
+
+def get_align_stats(alignment, include, count_indels=False, error_qual_thres=0):
+  """Compare to consensus and find errors."""
+  num_seqs = len(alignment.seqs)
+  error_types = get_family_errors(alignment.seqs, alignment.quals, alignment.consensus,
+                                  error_qual_thres, count_indels=count_indels)
+  overlap = collections.defaultdict(int)
+  align_stats = {'num_seqs':num_seqs, 'consensus':alignment.consensus, 'errors':error_types,
+                 'overlap':overlap, 'ids':alignment.ids}
+  if include['bases']:
+    align_stats['bases'] = sum_lengths(alignment.seqs)
+  if include['seqs']:
+    align_stats['seqs'] = alignment.seqs
+  return align_stats
 
 
 def make_new_family():
@@ -481,11 +494,11 @@ def sum_lengths(seq_align):
   return bases
 
 
-def print_errors_human(barcode, order, mate, family_stat, var_columns, seq_align):
+def print_errors_human(barcode, order, mate, align_stats, var_columns, seq_align):
   errors_per_seq, repeated_errors, error_repeat_counts = tally_errors(
-    family_stat['errors'], family_stat['num_seqs']
+    align_stats['errors'], align_stats['num_seqs']
   )
-  masked_alignment = mask_alignment(seq_align, family_stat['errors'])
+  masked_alignment = mask_alignment(seq_align, align_stats['errors'])
   for seq, seq_errors in zip(masked_alignment, errors_per_seq):
     print('{} errors: {}'.format(seq, seq_errors))
   if var_columns == 'errors':
@@ -493,27 +506,27 @@ def print_errors_human(barcode, order, mate, family_stat, var_columns, seq_align
   elif var_columns == 'reads':
     final_stat = repeated_errors
   print('{} errors: {}, repeat errors: {}\n'
-        .format(family_stat['consensus'], sum(errors_per_seq), final_stat))
+        .format(align_stats['consensus'], sum(errors_per_seq), final_stat))
 
 
-def print_errors_tsv(barcode, order, mate, family_stat, var_columns, columns):
+def print_errors_tsv(barcode, order, mate, align_stats, var_columns, columns):
   errors_per_seq, repeated_errors, error_repeat_counts = tally_errors(
-    family_stat['errors'], family_stat['num_seqs']
+    align_stats['errors'], align_stats['num_seqs']
   )
   fields = [barcode, order, mate]
   for column in columns:
     if column == 'famsize':
-      fields.append(family_stat['num_seqs'])
+      fields.append(align_stats['num_seqs'])
     elif column == 'repeats':
       fields.append(repeated_errors)
     elif column == 'ids':
-      fields.append(','.join(family_stat['ids']))
+      fields.append(','.join(align_stats['ids']))
     elif column == 'gc':
-      fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
+      fields.append('{:0.3f}'.format(get_gc_content(align_stats['consensus'])))
     elif column == 'errcount':
       fields.append(len(error_repeat_counts))
     elif column == 'bases':
-      fields.append(family_stat['bases'])
+      fields.append(align_stats['bases'])
     else:
       fail('Error: Unrecognized --column "{}".'.format(column))
   if var_columns == 'reads':
