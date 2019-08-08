@@ -54,9 +54,23 @@ else:
 GAP_WIN_LEN = 4
 QUAL_OFFSET = 33 # Sanger
 
-DESCRIPTION = """Tally statistics on errors in reads, compared to their (single-stranded) \
-consensus sequences. Output is one tab-delimited line per single-read alignment (one mate within \
-one strand (order) within one family (barcode)).
+class Alignment(object):
+  __slots__ = ('seqs', 'quals', 'ids', 'consensus')
+  def __init__(self, **kwargs):
+    for name in self.__slots__:
+      if name in kwargs:
+        setattr(self, name, kwargs[name])
+      elif name == 'consensus':
+        self.consensus = None
+      else:
+        setattr(self, name, [])
+
+DESCRIPTION = """Tally statistics on errors in reads, compared to their consensus sequences.
+This will examine each set of aligned reads, build a consensus sequence, and then compare each raw \
+read to the consensus to detect errors. It will then print statistics on those errors.
+Output is one tab-delimited line per alignment. Each alignment is of the reads for one mate on one \
+strand in one barcode family, unless --duplex is given, in which case it's for one mate in one \
+barcode family (both strands).
 A "unique error" is a class of error defined by its reference coordinate and the erroneous base.
 A single unique error may occur several times in the same family, if it happened on multiple reads.
 The first four output columns are always:
@@ -79,7 +93,7 @@ Format of --overlap-stats is tab-delimited statistics on each mate:
 
 def make_argparser():
 
-  # Need to use argparse.RawDescriptionHelpFormatter to preserve formatting in the
+  # Need to use argparse.RawTextHelpFormatter to preserve formatting in the
   # description of columns in the tsv output. But to still accommodate different
   # terminal widths, dynamic wrapping with simplewrap will be necessary.
   wrapper = simplewrap.Wrapper()
@@ -203,8 +217,11 @@ def main(argv):
     columns = args.columns
 
   if args.dedup:
-    if not args.bam:
-      fail('--dedup requires a --bam file to be supplied.')
+    if args.bam:
+      if not os.path.exists(args.bam):
+        fail('Error: --bam file {!r} not found.'.format(args.bam))
+    else:
+      fail('Error: --dedup requires a --bam file to be supplied.')
     try:
       pyBamParser.bam
     except NameError:
@@ -222,7 +239,11 @@ def main(argv):
     barcode = family['bar']
     if args.dedup:
       family_stats[barcode] = {'ab':[{}, {}], 'ba':[{}, {}]}
+    # Calculate the consensus sequences for the family and add them to it.
     add_consensi(family, args.qual_thres)
+    # Count whether the family contains both strands.
+    # If it does, and we're doing --duplex, get the duplex consensus and realign the reads to it.
+    # Then replace both single-stranded alignments with the duplex one.
     if is_double_stranded(family):
       double_strand_families += 1
       if args.duplex:
@@ -231,29 +252,29 @@ def main(argv):
       single_strand_families += 1
       if args.duplex:
         continue
+    # Main loop: Compare raw reads to consensi and find errors.
     for order in ('ab', 'ba'):
       for mate in (0, 1):
         if args.duplex and order == 'ba':
           # Since ab.1 == ba.2 and ab.2 == ba.1 in duplex families, only process ab.
           # This also means the mate value will still be accurate, meaning the duplex mate.
           continue
-        seq_align = family[order][mate]['seqs']
-        qual_align = family[order][mate]['quals']
-        consensus = family[order][mate]['consensus']
-        ids = family[order][mate]['ids']
-        num_seqs = len(seq_align)
-        error_types = get_family_errors(seq_align, qual_align, consensus, error_qual_thres,
-                                        count_indels=args.indels)
+        # Compare to consensus and find errors.
+        alignment = family[order][mate]
+        num_seqs = len(alignment.seqs)
+        error_types = get_family_errors(alignment.seqs, alignment.quals, alignment.consensus,
+                                        error_qual_thres, count_indels=args.indels)
         overlap = collections.defaultdict(int)
-        family_stat = {'num_seqs':num_seqs, 'consensus':consensus, 'errors':error_types,
-                       'overlap':overlap, 'ids':ids}
+        family_stat = {'num_seqs':num_seqs, 'consensus':alignment.consensus, 'errors':error_types,
+                       'overlap':overlap, 'ids':alignment.ids}
         if 'bases' in columns:
-          family_stat['bases'] = sum_lengths(seq_align)
+          family_stat['bases'] = sum_lengths(alignment.seqs)
         if args.dedup:
           family_stats[barcode][order][mate] = family_stat
         elif num_seqs >= args.min_reads:
           print_errors(barcode, order, mate+args.mate_offset, family_stat, var_columns,
-                       columns, args.human, seq_align, qual_align)
+                       columns, args.human, alignment.seqs, alignment.quals)
+      #TODO: Deduplicate overlap errors here, using raw read alignments.
 
   total = single_strand_families + double_strand_families
   logging.info('Processed {} families: {:0.2f}% single-stranded, {:0.2f}% double-stranded.'
@@ -281,28 +302,28 @@ def parse_families(infile):
   family = {
     'bar': barcode,                          # family 'AAACCGACACAGGACTAGGGATCA'
     'ab': (                                    # order ab
-            {                                    # mate 1
-              'seqs':  [seq1,   seq2,   seq3],     # sequences
-              'quals': [quals1, quals2, quals3],   # quality scores
-              'ids':   [id1,    id2,    id3],      # read ids
-            },
-            {                                    # mate 2
-              'seqs':  [seq1,   seq2],
-              'quals': [quals1, quals2],
-              'ids':   [id1,    id2]
-            },
+            Alignment(                           # mate 1
+              seqs= [seq1,   seq2,   seq3],        # sequences
+              quals=[quals1, quals2, quals3],      # quality scores
+              ids=  [id1,    id2,    id3],         # read ids
+            ),
+            Alignment(                           # mate 2
+              seqs= [seq1,   seq2],
+              quals=[quals1, quals2],
+              ids=  [id1,    id2],
+            ),
           ),
     'ba': (                                    # order ba
-            {                                    # mate 1
-              'seqs':  [seq1,   seq2],
-              'quals': [quals1, quals2]
-              'ids':   [id1,    id2]
-            },
-            {                                    # mate 2
-              'seqs':  [],
-              'quals': [],
-              'ids':   [],
-            },
+            Alignment(                           # mate 1
+              seqs= [seq1,   seq2],
+              quals=[quals1, quals2],
+              ids=  [id1,    id2],
+            ),
+            Alignment(                           # mate 2
+              seqs= [],
+              quals=[],
+              ids=  [],
+            ),
           )
   }
   That is, each family is a dict with the 'bar' key giving the barcode sequence, and a key for both
@@ -316,19 +337,8 @@ def parse_families(infile):
   Getting the sequences for mate 2 of order "ba":
   seq_align = family['ba'][1]['seqs']
   """
-  last_barcode = None
-  empty_family = {
-    'bar':None,
-    'ab': (
-      {'seqs':[], 'quals':[], 'ids':[]},
-      {'seqs':[], 'quals':[], 'ids':[]}
-    ),
-    'ba': (
-      {'seqs':[], 'quals':[], 'ids':[]},
-      {'seqs':[], 'quals':[], 'ids':[]}
-    )
-  }
-  family = copy.deepcopy(empty_family)
+  last_barcode = barcode = None
+  family = make_new_family()
   for line in infile:
     fields = line.rstrip('\r\n').split('\t')
     barcode, order, mate_str, name, seq, quals = fields
@@ -342,36 +352,53 @@ def parse_families(infile):
       if last_barcode is not None:
         family['bar'] = last_barcode
         yield family
-      family = copy.deepcopy(empty_family)
+      family = make_new_family()
       last_barcode = barcode
-    family[order][mate]['seqs'].append(seq)
-    family[order][mate]['quals'].append(quals)
-    family[order][mate]['ids'].append(read_id)
+    family[order][mate].seqs.append(seq)
+    family[order][mate].quals.append(quals)
+    family[order][mate].ids.append(read_id)
   family['bar'] = barcode
   yield family
+
+
+def make_new_family():
+  return {
+    'bar':None,
+    'ab': (
+      Alignment(),
+      Alignment()
+    ),
+    'ba': (
+      Alignment(),
+      Alignment()
+    ),
+  }
 
 
 def add_consensi(family, qual_thres):
   for order in ('ab', 'ba'):
     for mate in (0, 1):
-      subfamily = family[order][mate]
-      subfamily['consensus'] = consensuslib.get_consensus(subfamily['seqs'], subfamily['quals'],
-                                                          qual_thres=chr(qual_thres+QUAL_OFFSET),
-                                                          gapped=True)
+      alignment = family[order][mate]
+      alignment.consensus = consensuslib.get_consensus(
+        alignment.seqs,
+        alignment.quals,
+        qual_thres=chr(qual_thres+QUAL_OFFSET),
+        gapped=True
+      )
 
 
 def get_duplex_consensi(family):
   consensi = []
   for (order1, mate1), (order2, mate2) in (('ab', 0), ('ba', 1)), (('ab', 1), ('ba', 0)):
-    alignment = swalign.smith_waterman(family[order1][mate1]['consensus'].replace('-', ''),
-                                       family[order2][mate2]['consensus'].replace('-', ''))
-    consensi.append(consensuslib.build_consensus_duplex_simple(alignment.query, alignment.target))
+    result = swalign.smith_waterman(family[order1][mate1].consensus.replace('-', ''),
+                                    family[order2][mate2].consensus.replace('-', ''))
+    consensi.append(consensuslib.build_consensus_duplex_simple(result.query, result.target))
   return consensi
 
 
 def is_double_stranded(family):
-  return (family['ab'][0]['seqs'] and family['ba'][1]['seqs'] and
-          family['ab'][1]['seqs'] and family['ba'][0]['seqs'])
+  return (family['ab'][0].seqs and family['ba'][1].seqs and
+          family['ab'][1].seqs and family['ba'][0].seqs)
 
 
 def transform_to_duplex_family(family, validate=False):
@@ -381,24 +408,27 @@ def transform_to_duplex_family(family, validate=False):
   duplex_mates = ((('ab', 0), ('ba', 1)), (('ab', 1), ('ba', 0)))
   for mate_num, duplex_mate in enumerate(duplex_mates):
     for order, mate in duplex_mate:
-      family[order][mate]['consensus'] = duplex_consensi[mate_num]
+      family[order][mate].consensus = duplex_consensi[mate_num]
   # Realign the reads and quality scores to the duplex consensus sequences.
   for duplex_mate in duplex_mates:
+    # Combine the alignments.
     seq_align = []
     qual_align = []
     ids = []
     for order, mate in duplex_mate:
-      seq_align  += family[order][mate]['seqs']
-      qual_align += family[order][mate]['quals']
-      ids += family[order][mate]['ids']
-      consensus = family[order][mate]['consensus']
+      seq_align  += family[order][mate].seqs
+      qual_align += family[order][mate].quals
+      ids += family[order][mate].ids
+      consensus = family[order][mate].consensus
     consensus, seq_align, qual_align = realign_family_to_consensus(consensus, seq_align, qual_align,
                                                                    validate=validate)
+    # Replace both strands' alignments with the new, combined duplex one.
+    #TODO: Remove one of the strands instead of representing the new one twice?
     for order, mate in duplex_mate:
-      family[order][mate]['seqs'] = seq_align
-      family[order][mate]['quals'] = qual_align
-      family[order][mate]['consensus'] = consensus
-      family[order][mate]['ids'] = ids
+      family[order][mate].seqs = seq_align
+      family[order][mate].quals = qual_align
+      family[order][mate].consensus = consensus
+      family[order][mate].ids = ids
 
 
 def realign_family_to_consensus(consensus, family, quals, validate=False):
