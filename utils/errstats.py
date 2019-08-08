@@ -238,73 +238,48 @@ def main(argv):
   }
 
   logging.info('Calculating consensus sequences and counting errors..')
-  single_strand_families = double_strand_families = 0
-  family_stats = {}
-  for family in parse_families(args.input):
-    barcode = family['bar']
+  counts = {'ss_families':0, 'ds_families':0}
+  family_stats = collections.defaultdict(lambda: {'ab':[{}, {}], 'ba':[{}, {}]})
+  for align_stats, barcode, order, mate in get_family_stats(
+      parse_families(args.input),
+      include_stats,
+      args.duplex,
+      args.qual_thres,
+      args.indels,
+      args.validate_kalign,
+      error_qual_thres,
+      counts,
+  ):
     if args.dedup:
-      family_stats[barcode] = {'ab':[{}, {}], 'ba':[{}, {}]}
-    # Calculate the consensus sequences for the family and add them to it.
-    add_consensi(family, args.qual_thres)
-    # Count whether the family contains both strands.
-    # If it does, and we're doing --duplex, get the duplex consensus and realign the reads to it.
-    # Then replace both single-stranded alignments with the duplex one.
-    if is_double_stranded(family):
-      double_strand_families += 1
-      if args.duplex:
-        transform_to_duplex_family(family, validate=args.validate_kalign)
+      family_stats[barcode][order][mate] = align_stats
     else:
-      single_strand_families += 1
-      if args.duplex:
-        continue
-    # Main loop: Compare raw reads to consensi and find errors.
+      if align_stats['num_seqs'] >= args.min_reads:
+        print_errors(
+          args.human, barcode, order, mate+args.mate_offset, align_stats, var_columns, columns
+        )
+
+  total = sum(counts.values())
+  logging.info('Processed {} families: {:0.2f}% single-stranded, {:0.2f}% double-stranded.'
+               .format(total, 100*counts['ss_families']/total, 100*counts['ds_families']/total))
+
+  if not args.dedup:
+    return 0
+
+  logging.info('Deduplicating errors in overlaps..')
+  dedup_all_errors(args.bam, family_stats, args.dedup_log)
+  for barcode in family_stats:
     for order in ('ab', 'ba'):
       for mate in (0, 1):
         if args.duplex and order == 'ba':
-          # Since ab.1 == ba.2 and ab.2 == ba.1 in duplex families, only process ab.
-          # This also means the mate value will still be accurate, meaning the duplex mate.
           continue
-        align_stats = get_align_stats(
-          family[order][mate], include_stats, args.indels, error_qual_thres
+        align_stats = family_stats[barcode][order][mate]
+        if align_stats['num_seqs'] < args.min_reads:
+          continue
+        print_errors(
+          args.human, barcode, order, mate+args.mate_offset, align_stats, var_columns, columns
         )
-        if args.dedup:
-          family_stats[barcode][order][mate] = align_stats
-        elif align_stats['num_seqs'] >= args.min_reads:
-          if args.human:
-            print_errors_human(
-              barcode, order, mate+args.mate_offset, align_stats, var_columns, align_stats['seqs']
-            )
-          else:
-            print_errors_tsv(
-              barcode, order, mate+args.mate_offset, align_stats, var_columns, columns
-            )
-      #TODO: Deduplicate overlap errors here, using raw read alignments.
-
-  total = single_strand_families + double_strand_families
-  logging.info('Processed {} families: {:0.2f}% single-stranded, {:0.2f}% double-stranded.'
-               .format(total, 100*single_strand_families/total, 100*double_strand_families/total))
-
-  if args.dedup:
-    logging.info('Deduplicating errors in overlaps..')
-    dedup_all_errors(args.bam, family_stats, args.dedup_log)
-    for barcode in family_stats:
-      for order in ('ab', 'ba'):
-        for mate in (0, 1):
-          if args.duplex and order == 'ba':
-            continue
-          align_stats = family_stats[barcode][order][mate]
-          if align_stats['num_seqs'] < args.min_reads:
-            continue
-          if args.human:
-            print_errors_human(
-              barcode, order, mate+args.mate_offset, align_stats, var_columns, alignment.seqs
-            )
-          else:
-            print_errors_tsv(
-              barcode, order, mate+args.mate_offset, align_stats, var_columns, columns
-            )
-          if args.overlap_stats:
-            print_overlap_stats(barcode, order, mate, args.overlap_stats, align_stats['overlap'])
+        if args.overlap_stats:
+          print_overlap_stats(barcode, order, mate, args.overlap_stats, align_stats['overlap'])
 
 
 def parse_families(infile):
@@ -370,6 +345,45 @@ def parse_families(infile):
     family[order][mate].ids.append(read_id)
   family['bar'] = barcode
   yield family
+
+
+def get_family_stats(
+  families,
+  include_stats,
+  duplex=False,
+  qual_thres=0,
+  count_indels=False,
+  validate_kalign=False,
+  error_qual_thres=0,
+  counts=None,
+):
+  for family in families:
+    # Calculate the consensus sequences for the family and add them to it.
+    add_consensi(family, qual_thres)
+    # Count whether the family contains both strands.
+    # If it does, and we're doing --duplex, get the duplex consensus and realign the reads to it.
+    # Then replace both single-stranded alignments with the duplex one.
+    if is_double_stranded(family):
+      if counts:
+        counts['ds_families'] += 1
+      if duplex:
+        transform_to_duplex_family(family, validate=validate_kalign)
+    else:
+      if counts:
+        counts['ss_families'] += 1
+      if duplex:
+        continue
+    # Main loop: Compare raw reads to consensi and find errors.
+    for order in 'ab', 'ba':
+      for mate in 0, 1:
+        if duplex and order == 'ba':
+          # Since ab.1 == ba.2 and ab.2 == ba.1 in duplex families, only process ab.
+          # This also means the mate value will still be accurate, meaning the duplex mate.
+          continue
+        alignment = family[order][mate]
+        align_stats = get_align_stats(alignment, include_stats, count_indels, error_qual_thres)
+        yield align_stats, family['bar'], order, mate
+      #TODO: Deduplicate overlap errors here(?), using raw read alignments.
 
 
 def get_align_stats(alignment, include, count_indels=False, error_qual_thres=0):
@@ -494,11 +508,18 @@ def sum_lengths(seq_align):
   return bases
 
 
-def print_errors_human(barcode, order, mate, align_stats, var_columns, seq_align):
+def print_errors(human, barcode, order, mate, align_stats, var_columns, columns):
+  if human:
+    print_errors_human(barcode, order, mate, align_stats, var_columns)
+  else:
+    print_errors_tsv(barcode, order, mate, align_stats, var_columns, columns)
+
+
+def print_errors_human(barcode, order, mate, align_stats, var_columns):
   errors_per_seq, repeated_errors, error_repeat_counts = tally_errors(
     align_stats['errors'], align_stats['num_seqs']
   )
-  masked_alignment = mask_alignment(seq_align, align_stats['errors'])
+  masked_alignment = mask_alignment(align_stats['seqs'], align_stats['errors'])
   for seq, seq_errors in zip(masked_alignment, errors_per_seq):
     print('{} errors: {}'.format(seq, seq_errors))
   if var_columns == 'errors':
