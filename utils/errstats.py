@@ -272,8 +272,14 @@ def main(argv):
         if args.dedup:
           family_stats[barcode][order][mate] = family_stat
         elif num_seqs >= args.min_reads:
-          print_errors(barcode, order, mate+args.mate_offset, family_stat, var_columns,
-                       columns, args.human, alignment.seqs, alignment.quals)
+          if args.human:
+            print_errors_human(
+              barcode, order, mate+args.mate_offset, family_stat, var_columns, alignment.seqs
+            )
+          else:
+            print_errors_tsv(
+              barcode, order, mate+args.mate_offset, family_stat, var_columns, columns
+            )
       #TODO: Deduplicate overlap errors here, using raw read alignments.
 
   total = single_strand_families + double_strand_families
@@ -291,7 +297,14 @@ def main(argv):
           family_stat = family_stats[barcode][order][mate]
           if family_stat['num_seqs'] < args.min_reads:
             continue
-          print_errors(barcode, order, mate+args.mate_offset, family_stat, var_columns, columns)
+          if args.human:
+            print_errors_human(
+              barcode, order, mate+args.mate_offset, family_stat, var_columns, alignment.seqs
+            )
+          else:
+            print_errors_tsv(
+              barcode, order, mate+args.mate_offset, family_stat, var_columns, columns
+            )
           if args.overlap_stats:
             print_overlap_stats(barcode, order, mate, args.overlap_stats, family_stat['overlap'])
 
@@ -468,42 +481,46 @@ def sum_lengths(seq_align):
   return bases
 
 
-def print_errors(barcode, order, mate, family_stat, var_columns, columns, human=False,
-                 seq_align=None, qual_align=None):
-  errors_per_seq, repeated_errors, error_repeat_counts = tally_errors(family_stat['errors'],
-                                                                      family_stat['num_seqs'])
-  if human:
-    masked_alignment = mask_alignment(seq_align, family_stat['errors'])
-    for seq, seq_errors in zip(masked_alignment, errors_per_seq):
-      print('{} errors: {}'.format(seq, seq_errors))
-    if var_columns == 'errors':
-      final_stat = ', '.join(map(str, error_repeat_counts))
-    elif var_columns == 'reads':
-      final_stat = repeated_errors
-    print('{} errors: {}, repeat errors: {}\n'
-          .format(family_stat['consensus'], sum(errors_per_seq), final_stat))
-  else:
-    fields = [barcode, order, mate]
-    for column in columns:
-      if column == 'famsize':
-        fields.append(family_stat['num_seqs'])
-      elif column == 'repeats':
-        fields.append(repeated_errors)
-      elif column == 'ids':
-        fields.append(','.join(family_stat['ids']))
-      elif column == 'gc':
-        fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
-      elif column == 'errcount':
-        fields.append(len(error_repeat_counts))
-      elif column == 'bases':
-        fields.append(family_stat['bases'])
-      else:
-        fail('Error: Unrecognized --column "{}".'.format(column))
-    if var_columns == 'reads':
-      fields.extend(errors_per_seq)
-    elif var_columns == 'errors':
-      fields.extend(error_repeat_counts)
-    print(*fields, sep='\t')
+def print_errors_human(barcode, order, mate, family_stat, var_columns, seq_align):
+  errors_per_seq, repeated_errors, error_repeat_counts = tally_errors(
+    family_stat['errors'], family_stat['num_seqs']
+  )
+  masked_alignment = mask_alignment(seq_align, family_stat['errors'])
+  for seq, seq_errors in zip(masked_alignment, errors_per_seq):
+    print('{} errors: {}'.format(seq, seq_errors))
+  if var_columns == 'errors':
+    final_stat = ', '.join(map(str, error_repeat_counts))
+  elif var_columns == 'reads':
+    final_stat = repeated_errors
+  print('{} errors: {}, repeat errors: {}\n'
+        .format(family_stat['consensus'], sum(errors_per_seq), final_stat))
+
+
+def print_errors_tsv(barcode, order, mate, family_stat, var_columns, columns):
+  errors_per_seq, repeated_errors, error_repeat_counts = tally_errors(
+    family_stat['errors'], family_stat['num_seqs']
+  )
+  fields = [barcode, order, mate]
+  for column in columns:
+    if column == 'famsize':
+      fields.append(family_stat['num_seqs'])
+    elif column == 'repeats':
+      fields.append(repeated_errors)
+    elif column == 'ids':
+      fields.append(','.join(family_stat['ids']))
+    elif column == 'gc':
+      fields.append('{:0.3f}'.format(get_gc_content(family_stat['consensus'])))
+    elif column == 'errcount':
+      fields.append(len(error_repeat_counts))
+    elif column == 'bases':
+      fields.append(family_stat['bases'])
+    else:
+      fail('Error: Unrecognized --column "{}".'.format(column))
+  if var_columns == 'reads':
+    fields.extend(errors_per_seq)
+  elif var_columns == 'errors':
+    fields.extend(error_repeat_counts)
+  print(*fields, sep='\t')
 
 
 def print_overlap_stats(barcode, order, mate, stats_fh, stats):
