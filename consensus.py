@@ -16,6 +16,7 @@ if not os.path.isfile(library_path):
   raise ioe
 
 consensus = ctypes.cdll.LoadLibrary(library_path)
+consensus.rm_gaps.restype = ctypes.c_char_p
 consensus.get_consensus.restype = ctypes.c_char_p
 consensus.get_consensus_duplex.restype = ctypes.c_char_p
 consensus.build_consensus_duplex_simple.restype = ctypes.c_char_p
@@ -45,6 +46,20 @@ def main(argv):
   print(cons)
 
 
+def rm_gaps(seq_raw):
+  seq_len = len(seq_raw)
+  if PY3:
+    seq_bytes = bytes(seq_raw, 'utf8')
+  else:
+    seq_bytes = bytes(seq_raw)
+  seq_c = ctypes.c_char_p(seq_bytes)
+  seq_gapless = consensus.rm_gaps(seq_c, seq_len)
+  if PY3:
+    return str(seq_gapless, 'utf8')
+  else:
+    return str(seq_gapless)
+
+
 # N.B.: The quality scores must be aligned with their accompanying sequences.
 def get_consensus(align, quals=[], cons_thres=-1.0, min_reads=0, qual_thres=' ', gapped=False):
   cons_thres_c = ctypes.c_double(cons_thres)
@@ -65,8 +80,10 @@ def get_consensus(align, quals=[], cons_thres=-1.0, min_reads=0, qual_thres=' ',
       seq_len = len(seq)
     else:
       if seq_len != len(seq):
-        raise AssertionError('All sequences in the alignment must be the same length: {}bp != {}bp.'
-                             '\nAlignment:\n{}'.format(seq_len, len(seq), '\n'.join(align)))
+        raise AssertionError(
+            'All sequences and quals lines in the alignment must be the same length: {}bp != {}bp. '
+            'Problem sequence:\n{}'.format(seq_len, len(seq), seq)
+        )
   align_c = str_pylist_to_str_carray(align, length=n_seqs)
   if quals:
     quals_c = str_pylist_to_str_carray(quals, length=n_seqs)
