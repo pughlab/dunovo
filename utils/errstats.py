@@ -54,16 +54,30 @@ else:
 GAP_WIN_LEN = 4
 QUAL_OFFSET = 33 # Sanger
 
+
 class Alignment(object):
   __slots__ = ('seqs', 'quals', 'ids', 'consensus')
+  defaults = {'consensus':None}
   def __init__(self, **kwargs):
     for name in self.__slots__:
       if name in kwargs:
         setattr(self, name, kwargs[name])
-      elif name == 'consensus':
-        self.consensus = None
       else:
-        setattr(self, name, [])
+        default = self.defaults.get(name, [])
+        setattr(self, name, default)
+
+
+class Error(object):
+  __slots__ = ('type', 'seq', 'coord', 'seq_coord', 'alt', 'passes')
+  defaults = {'passes':True}
+  def __init__(self, **kwargs):
+    for name in self.__slots__:
+      if name in kwargs:
+        setattr(self, name, kwargs[name])
+      else:
+        default = self.defaults.get(name, None)
+        setattr(self, name, default)
+
 
 DESCRIPTION = """Tally statistics on errors in reads, compared to their consensus sequences.
 This will examine each set of aligned reads, build a consensus sequence, and then compare each raw \
@@ -203,18 +217,7 @@ def main(argv):
   if args.human and args.out_format == 'errors2':
     fail('Error: --alignment invalid with --out-format errors2.')
 
-  if args.out_format == 'reads':
-    var_columns = 'reads'
-    columns = ('famsize', 'repeats')
-  elif args.out_format == 'errors1':
-    var_columns = 'errors'
-    columns = ('famsize',)
-  elif args.out_format == 'errors2':
-    var_columns = 'errors'
-    columns = ('famsize', 'ids', 'gc', 'errcount')
-  else:
-    var_columns = args.var_columns
-    columns = args.columns
+  columns, var_columns = determine_columns(args.out_format, args.columns, args.var_columns)
 
   if args.dedup:
     if args.bam:
@@ -280,6 +283,19 @@ def main(argv):
         )
         if args.overlap_stats:
           print_overlap_stats(barcode, order, mate, args.overlap_stats, align_stats['overlap'])
+
+
+def determine_columns(out_format, columns, var_columns):
+  if out_format == 'reads':
+    var_columns = 'reads'
+    columns = ('famsize', 'repeats')
+  elif out_format == 'errors1':
+    var_columns = 'errors'
+    columns = ('famsize',)
+  elif out_format == 'errors2':
+    var_columns = 'errors'
+    columns = ('famsize', 'ids', 'gc', 'errcount')
+  return columns, var_columns
 
 
 def parse_families(infile):
@@ -570,6 +586,9 @@ def print_overlap_stats(barcode, order, mate, stats_fh, stats):
   stats_fh.write('\t'.join(map(str, columns))+'\n')
 
 
+#################### Error computation ####################
+
+
 def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_indels=False):
   """Determine errors in sequences in an alignment by comparing to a consensus.
   Uses VCF notation for indels: coordinate is that of the base before the indel starts.
@@ -600,28 +619,28 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
           if not count_indels:
             continue
           running_indel = running_indels[seq_num]
-          if running_indel and running_indel['type'] == 'del':
+          if running_indel and running_indel.type == 'del':
             # We were already tracking a deletion.
-            running_indel['alt'] += 1
+            running_indel.alt += 1
           else:
             # We weren't already tracking a deletion.
             # Either there was no indel being tracked, or we were tracking an insertion.
-            running_indels[seq_num] = {'type':'del', 'seq':seq_num, 'coord':coord, 'alt':1, 'pass':True}
-            if running_indel and running_indel['type'] == 'ins':
+            running_indels[seq_num] = Error(type='del', seq=seq_num, coord=coord, alt=1)
+            if running_indel and running_indel.type == 'ins':
               errors.append(running_indel)
         elif cons_base == '-':
           # We're in an insertion.
           if not count_indels:
             continue
           running_indel = running_indels[seq_num]
-          if running_indel and running_indel['type'] == 'ins':
+          if running_indel and running_indel.type == 'ins':
             # We were already tracking an insertion.
-            running_indel['alt'] += base
+            running_indel.alt += base
           else:
             # We weren't already tracking an insertion.
             # Either there was no indel being tracked, or we were tracking a deletion.
-            running_indels[seq_num] = {'type':'ins', 'seq':seq_num, 'coord':coord, 'alt':base, 'pass':True}
-            if running_indel and running_indel['type'] == 'del':
+            running_indels[seq_num] = Error(type='ins', seq=seq_num, coord=coord, alt=base)
+            if running_indel and running_indel.type == 'del':
               errors.append(running_indel)
         else:
           # We're in an SNV.
@@ -629,7 +648,7 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
             # Finish up any indels currently being tracked.
             errors.append(running_indels[seq_num])
             running_indels[seq_num] = None
-          errors.append({'type':'SNV', 'seq':seq_num, 'coord':coord+1, 'alt':base, 'pass':True})
+          errors.append(Error(type='SNV', seq=seq_num, coord=coord+1, alt=base))
   # Finish remaining indels we've been tracking.
   for indel in running_indels:
     if indel is not None:
@@ -638,16 +657,16 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
   # from internal indels. They probably represent reference bases.           GATTACAGATTACA---
   # But there's no way to tell, so avoid concluding they're indels.          GATTA---ATTACAGAT
   for error in errors:
-    if error['type'] == 'ins':
-      alt_len = len(error['alt'])
-    elif error['type'] == 'del':
-      alt_len = error['alt']
+    if error.type == 'ins':
+      alt_len = len(error.alt)
+    elif error.type == 'del':
+      alt_len = error.alt
     else:
       continue
     # print('{seq}/{coord:02d}: {type} {alt} (len {})'.format(alt_len, **error))
-    if error['coord'] + alt_len == len(seq_align[error['seq']]):
+    if error.coord + alt_len == len(seq_align[error.seq]):
       # The indel runs right up to the end of the sequence. Note to exclude it from counts.
-      error['pass'] = False
+      error.passes = False
   return errors
 
 
@@ -714,11 +733,11 @@ def group_errors(errors):
   """Group errors by coordinate and base."""
   last_error = None
   current_types = []
-  for error in sorted(errors, key=lambda error: (error['coord'], error['type'], error['alt'])):
+  for error in sorted(errors, key=lambda error: (error.coord, error.type, error.alt)):
     if (last_error is not None and
-        last_error['coord'] == error['coord'] and
-        last_error['type'] == error['type'] and
-        last_error['alt'] == error['alt']):
+        last_error.coord == error.coord and
+        last_error.type == error.type and
+        last_error.alt == error.alt):
       current_types.append(error)
     else:
       if current_types:
@@ -734,13 +753,13 @@ def tally_errors(error_types, num_seqs):
   repeated_errors = 0
   error_repeat_counts = []
   for error_type in error_types:
-    if not error_type[0]['pass']:
+    if not error_type[0].passes:
       continue
     error_repeat_counts.append(len(error_type))
     if len(error_type) > 1:
       repeated_errors += 1
     for error in error_type:
-      errors_per_seq[error['seq']] += 1
+      errors_per_seq[error.seq] += 1
   return errors_per_seq, repeated_errors, error_repeat_counts
 
 
@@ -748,14 +767,14 @@ def mask_alignment(seq_alignment, error_types):
   masked_alignment = [['.'] * len(seq) for seq in seq_alignment]
   for error_type in error_types:
     for error in error_type:
-      seq_i = error['seq']
-      coord = error['coord']
-      alt = error['alt']
-      if error['type'] == 'SNV':
+      seq_i = error.seq
+      coord = error.coord
+      alt = error.alt
+      if error.type == 'SNV':
         masked_alignment[seq_i][coord-1] = alt
-      elif error['type'] == 'del':
+      elif error.type == 'del':
         masked_alignment[seq_i][coord:coord+alt] = ['-'] * alt
-      elif error['type'] == 'ins':
+      elif error.type == 'ins':
         masked_alignment[seq_i][coord:coord+len(alt)] = list(alt)
   return [''.join(seq) for seq in masked_alignment]
 
@@ -862,14 +881,14 @@ def convert_pair_errors(pair, pair_stats):
     error_types = pair_stats[mate]['errors']
     for i, error_type in enumerate(error_types):
       error = error_type[0]
-      if 'type' in error and error['type'] != 'SNV':
+      if error.type != 'SNV':
         #TODO: Make indel-compatible.
         continue
-      read_coord = error['coord']
+      read_coord = error.coord
       if read.is_seq_reverse_complement():
-        alt = get_revcomp(error['alt'])
+        alt = get_revcomp(error.alt)
       else:
-        alt = error['alt']
+        alt = error.alt
       ref_coord = read.to_ref_coord(read_coord, one_based=True)
       if ref_coord is None:
         nonref_errors[mate].append(error_type)
@@ -932,7 +951,7 @@ def log_nonref_errors(nonref_errors, dedup_log):
   for mate in (0, 1):
     for error_type in nonref_errors[mate]:
       error = error_type[0]
-      dedup_log.write('{:5d} {:1s}:  '.format(error['coord'], error['alt']))
+      dedup_log.write('{:5d} {:1s}:  '.format(error.coord, error.alt))
       if mate == 1:
         dedup_log.write('             ')
       dedup_log.write('  {:2d} errors\n'.format(len(error_type)))
