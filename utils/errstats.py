@@ -68,7 +68,7 @@ class Alignment(object):
 
 
 class Error(object):
-  __slots__ = ('type', 'seq', 'coord', 'seq_coord', 'alt', 'passes')
+  __slots__ = ('type', 'seq', 'aln_coord', 'read_coord', 'alt', 'passes')
   defaults = {'passes':True}
   def __init__(self, **kwargs):
     for name in self.__slots__:
@@ -625,7 +625,7 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
           else:
             # We weren't already tracking a deletion.
             # Either there was no indel being tracked, or we were tracking an insertion.
-            running_indels[seq_num] = Error(type='del', seq=seq_num, coord=coord, alt=1)
+            running_indels[seq_num] = Error(type='del', seq=seq_num, aln_coord=coord, alt=1)
             if running_indel and running_indel.type == 'ins':
               errors.append(running_indel)
         elif cons_base == '-':
@@ -639,7 +639,7 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
           else:
             # We weren't already tracking an insertion.
             # Either there was no indel being tracked, or we were tracking a deletion.
-            running_indels[seq_num] = Error(type='ins', seq=seq_num, coord=coord, alt=base)
+            running_indels[seq_num] = Error(type='ins', seq=seq_num, aln_coord=coord, alt=base)
             if running_indel and running_indel.type == 'del':
               errors.append(running_indel)
         else:
@@ -648,7 +648,7 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
             # Finish up any indels currently being tracked.
             errors.append(running_indels[seq_num])
             running_indels[seq_num] = None
-          errors.append(Error(type='SNV', seq=seq_num, coord=coord+1, alt=base))
+          errors.append(Error(type='SNV', seq=seq_num, aln_coord=coord+1, alt=base))
   # Finish remaining indels we've been tracking.
   for indel in running_indels:
     if indel is not None:
@@ -664,7 +664,7 @@ def get_alignment_errors(consensus, seq_align, qual_align, qual_thres, count_ind
     else:
       continue
     # print('{seq}/{coord:02d}: {type} {alt} (len {})'.format(alt_len, **error))
-    if error.coord + alt_len == len(seq_align[error.seq]):
+    if error.aln_coord + alt_len == len(seq_align[error.seq]):
       # The indel runs right up to the end of the sequence. Note to exclude it from counts.
       error.passes = False
   return errors
@@ -733,9 +733,9 @@ def group_errors(errors):
   """Group errors by coordinate and base."""
   last_error = None
   current_types = []
-  for error in sorted(errors, key=lambda error: (error.coord, error.type, error.alt)):
+  for error in sorted(errors, key=lambda error: (error.aln_coord, error.type, error.alt)):
     if (last_error is not None and
-        last_error.coord == error.coord and
+        last_error.aln_coord == error.aln_coord and
         last_error.type == error.type and
         last_error.alt == error.alt):
       current_types.append(error)
@@ -768,7 +768,7 @@ def mask_alignment(seq_alignment, error_types):
   for error_type in error_types:
     for error in error_type:
       seq_i = error.seq
-      coord = error.coord
+      coord = error.aln_coord
       alt = error.alt
       if error.type == 'SNV':
         masked_alignment[seq_i][coord-1] = alt
@@ -870,8 +870,8 @@ def convert_pair_errors(pair, pair_stats):
   1. errors which have a reference coordinate
   - A list of two dicts, one per mate.
     - Each dict is indexed by a 2-tuple: (the reference coordinate, the erroneous base)
-      - Each value of the dicts is an error_type, as created by group_errors().
-  2. errors with no reference coordinate (failed conversion: read.to_ref_coord() returns None)
+      - Each value of the dicts is an `error_type`, as `created by group_errors()`.
+  2. errors with no reference coordinate (failed conversion: `read.to_ref_coord()` returns `None`)
   - A list of two lists, one per mate.
     - Each value of each list is an error_type."""
   errors_by_ref_coord = [{}, {}]
@@ -884,7 +884,7 @@ def convert_pair_errors(pair, pair_stats):
       if error.type != 'SNV':
         #TODO: Make indel-compatible.
         continue
-      read_coord = error.coord
+      read_coord = error.aln_coord
       if read.is_seq_reverse_complement():
         alt = get_revcomp(error.alt)
       else:
@@ -951,7 +951,7 @@ def log_nonref_errors(nonref_errors, dedup_log):
   for mate in (0, 1):
     for error_type in nonref_errors[mate]:
       error = error_type[0]
-      dedup_log.write('{:5d} {:1s}:  '.format(error.coord, error.alt))
+      dedup_log.write('{:5d} {:1s}:  '.format(error.aln_coord, error.alt))
       if mate == 1:
         dedup_log.write('             ')
       dedup_log.write('  {:2d} errors\n'.format(len(error_type)))
