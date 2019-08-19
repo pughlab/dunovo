@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import division
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import unicode_literals
 import sys
 import errno
 import random
@@ -25,10 +21,14 @@ def make_argparser():
     help='Write the first-mate reads to this fastq file. Warning: will overwrite any existing file.')
   parser.add_argument('-r', '--ref', type=argparse.FileType('w'),
     help='Write the reference sequence to this file. Warning: will overwrite any existing file.')
+  parser.add_argument('-d', '--duplex', action='store_true',
+    help='Interpret these as duplex reads, and prepend with barcodes and constant sequences.')
   parser.add_argument('-c', '--const', default='TACGT',
     help='Default: %(default)s')
   parser.add_argument('-q', '--default-qual', type=int, default=40,
     help='Default: %(default)s')
+  parser.add_argument('-n', '--add-pair-num', action='store_true',
+    help='Append the read pair number to the read names (not compatible with --duplex).')
   parser.add_argument('-B', '--print-barlen', action='store_true',
     help='Print the detected lenght of the barcodes to stdout.')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
@@ -48,6 +48,12 @@ def main(argv):
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
   tone_down_logger()
 
+  add_pair_num = args.add_pair_num
+  if args.duplex:
+    if args.add_pair_num:
+      fail('Error: --duplex and --add-pair-num not compatible.')
+    add_pair_num = True
+
   qual_char = chr(args.default_qual+32)
 
   if args.fq1 and args.fq2:
@@ -57,9 +63,12 @@ def main(argv):
 
   barlen = None
 
+  if add_pair_num:
+    pair_num = 0
+  else:
+    pair_num = None
   ref_seq = None
   family_num = 0
-  pair_num = 0
   first_mate = None
   last_barcode = None
   for line_raw in args.alignment:
@@ -80,24 +89,32 @@ def main(argv):
       mate = int(prefix[1])
       if first_mate is None:
         first_mate = mate
-      barcode = prefix[2:]
-      if barcode != last_barcode:
-        family_num += 1
-        pair_num = 0
-        if barlen is not None and barlen != len(barcode):
-          fail('Error: Variable barcode lengths encountered. Barcode {!r} length != {}.'
-               .format(barcode, barlen))
-        barlen = len(barcode)
-      if mate == first_mate:
+      if args.duplex:
+        barcode = prefix[2:]
+        if barcode != last_barcode:
+          family_num += 1
+          pair_num = 0
+          if barlen is not None and barlen != len(barcode):
+            fail('Error: Variable barcode lengths encountered. Barcode {!r} length != {}.'
+                 .format(barcode, barlen))
+          barlen = len(barcode)
+        tags = (barcode[:barlen//2], barcode[barlen//2:])
+      else:
+        name = prefix[2:] or None
+      if mate == first_mate and add_pair_num:
         pair_num += 1
       raw_seq, pos, direction = get_raw_seq(line)
-      tags = (barcode[:barlen//2], barcode[barlen//2:])
       final_seq = substitute_ref_bases(raw_seq, pos, raw_ref_seq)
       if fq_files:
-        for line in format_read(final_seq, direction, mate, family_num, pair_num, tags, args.const,
-                                qual_char):
-          fq_files[mate-1].write(line+'\n')
-      last_barcode = barcode
+        if args.duplex:
+          formatter = format_duplex_read(
+            final_seq, direction, mate, family_num, pair_num, tags, args.const, qual_char
+          )
+        else:
+          formatter = format_read(final_seq, qual_char, name, pair_num)
+        write_read(fq_files, mate, formatter)
+      if args.duplex:
+        last_barcode = barcode
 
   if args.print_barlen:
     print(barlen)
@@ -132,7 +149,25 @@ def substitute_ref_bases(raw_seq, pos, ref_seq):
   return final_seq
 
 
-def format_read(seq, direction, mate, family_num, pair_num, tags, const, qual_char):
+def write_read(fq_files, mate, formatter):
+  for line in formatter:
+    fq_files[mate-1].write(line+'\n')
+
+
+def format_read(seq, qual_char, name=None, pair_num=None):
+  if name is not None:
+    if pair_num is None:
+      yield f'@{name}'
+    else:
+      yield f'@{name}.{pair_num}'
+  else:
+    yield f'@{random.randint(100000, 999999)}'
+  yield seq
+  yield '+'
+  yield qual_char * len(seq)
+
+
+def format_duplex_read(seq, direction, mate, family_num, pair_num, tags, const, qual_char):
   # Read name (line 1):
   if (direction == 'forward' and mate == 1) or (direction == 'reverse' and mate == 2):
     order = 'ab'
