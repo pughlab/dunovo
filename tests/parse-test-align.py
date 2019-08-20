@@ -104,7 +104,11 @@ def main(argv):
       if mate == first_mate and add_pair_num:
         pair_num += 1
       raw_seq, pos, direction = get_raw_seq(line)
-      final_seq = substitute_ref_bases(raw_seq, pos, raw_ref_seq)
+      mutated_seq = substitute_ref_bases(raw_seq, pos, raw_ref_seq)
+      if direction == 'reverse':
+        final_seq = revcomp(mutated_seq)
+      else:
+        final_seq = mutated_seq
       if fq_files:
         if args.duplex:
           formatter = format_duplex_read(
@@ -180,10 +184,7 @@ def format_duplex_read(seq, direction, mate, family_num, pair_num, tags, const, 
   if order == 'ba':
     tags_ordered = list(reversed(tags))
   tag = tags_ordered[mate-1]
-  if direction == 'reverse':
-    yield tag + const + revcomp(seq)
-  else:
-    yield tag + const + seq
+  yield tag + const + seq
   # Plus (line 3):
   yield '+'
   # Quality scores (line 4):
