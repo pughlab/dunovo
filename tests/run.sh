@@ -346,20 +346,6 @@ function filt {
     | diff -s "$dirname/filter.-r5.out.tsv" -
 }
 
-function parse_test_align {
-  echo -e "\t${FUNCNAME[0]}:\tparse-test-align.py ::: overlap.align.txt:"
-  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" tests/parse-test-align.py); then return 1; fi
-  "${local_prefix}parse-test-align.py" --ref "$dirname/overlap.ref.tmp.fa" \
-    --fq1 "$dirname/overlap.reads.tmp_1.fq" --fq2 "$dirname/overlap.reads.tmp_2.fq" \
-    "$dirname/overlap.align.txt" >/dev/null
-  for out in overlap.ref.tmp.fa overlap.reads.tmp_1.fq overlap.reads.tmp_2.fq; do
-    expected=$(echo "$out" | sed -E 's/\.tmp//')
-    diff -s "$dirname/$expected" "$dirname/$out"
-    if [[ -f "$dirname/$out" ]]; then
-      rm "$dirname/$out"
-    fi
-  done
-}
 
 function errstats_simple {
   echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: families.msa.tsv:"
@@ -397,6 +383,10 @@ all_declarations_minus_inactive=$(declare -F)
 
 function errstats_overlap {
   # Note: Currently, the correct PYBAMPATH is ~/bx/code/indels/pyBamParser/hg/lib.
+  # Test input was created with these commands:
+  # $ ../bfx/parse-test-align.py --duplex overlap.align.txt --ref overlap.ref.fa \
+  #   --fq1 overlap.reads_1.fq --fq2 overlap.reads_2.fq
+  # $ ../bfx/align-bowtie.sh -c -b overlap.reads.bam overlap.ref.fa overlap.reads_[12].fq
   echo -e "\t${FUNCNAME[0]}:\terrstats.py ::: overlap.families.msa.tsv"
   if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/errstats.py); then return 1; fi
   "${local_prefix}errstats.py" --dedup --min-reads 3 --bam "$dirname/overlap.sscs.bam" \
