@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-from __future__ import division
+#!/usr/bin/env python3
 import os
 import sys
 import time
@@ -290,7 +289,7 @@ def process_duplex(duplex, barcode, aligner='mafft'):
   output = ''
   logging.debug('Starting {} (orders "{}")'.format(barcode, '", "'.join(map(str, duplex.keys()))))
   run_stats = {'time':0, 'runs':0, 'aligned_pairs':0, 'failures':0}
-  orders = duplex.keys()
+  orders = tuple(duplex.keys())
   if len(duplex) == 0 or None in duplex:
     logging.warning('Empty duplex {}.'.format(barcode))
     return '', {}

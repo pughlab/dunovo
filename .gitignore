@@ -16,3 +16,5 @@ consensus
 utils/*.fq
 utils/*.fq.gz
 .gitattributes
+.mypy_cache
+__pycache__

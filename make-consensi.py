@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-from __future__ import division
+#!/usr/bin/env python3
 import os
 import sys
 import time

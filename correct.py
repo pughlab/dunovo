@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-from __future__ import division
-from __future__ import print_function
+#!/usr/bin/env python3
 import os
 import sys
 import gzip
@@ -428,7 +426,8 @@ def make_correction_table(meta_graph, family_counts, choose_by='count'):
   """Make a table mapping original barcode sequences to correct barcodes.
   Assumes the most connected node in the graph as the correct barcode."""
   corrections = {}
-  for graph in networkx.connected_component_subgraphs(meta_graph):
+  for nodes in networkx.connected_components(meta_graph):
+    graph = meta_graph.subgraph(nodes)
     if choose_by == 'count':
       def key(bar):
         return family_counts[bar]['all']
@@ -532,7 +531,8 @@ def is_alignment_reversed(barcode1, barcode2):
 def count_structures(meta_graph, family_counts):
   """Count the number of unique (isomorphic) subgraphs in the main graph."""
   structures = []
-  for graph in networkx.connected_component_subgraphs(meta_graph):
+  for nodes in networkx.connected_components(meta_graph):
+    graph = meta_graph.subgraph(nodes)
     match = False
     for structure in structures:
       archetype = structure['graph']
