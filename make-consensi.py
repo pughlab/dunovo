@@ -205,55 +205,7 @@ def main(argv):
                                         callback_args=[filehandles, stats],
                                        )
     try:
-      total_reads = 0
-      duplex = collections.OrderedDict()
-      family = []
-      barcode = None
-      order = None
-      # Note: mate is a 0-indexed integer ("mate 1" from the input file is mate 0 here).
-      mate = None
-      for line in args.infile:
-        # Allow comments (e.g. for test input files).
-        if line.startswith('#'):
-          continue
-        fields = line.rstrip('\r\n').split('\t')
-        if len(fields) != 6:
-          continue
-        this_barcode, this_order, this_mate, name, seq, qual = fields
-        this_mate = int(this_mate)-1
-        # If the barcode, order, and mate are the same, we're just continuing the add reads to the
-        # current family. Otherwise, store the current family, start a new one, and process the
-        # duplex if we're at the end of one.
-        new_barcode = this_barcode != barcode
-        new_order = this_order != order
-        new_mate = this_mate != mate
-        if new_barcode or new_order or new_mate:
-          if order is not None and mate is not None:
-            duplex[(order, mate)] = family
-          # If the barcode changed, process the last duplex and start a new one.
-          if new_barcode and barcode is not None:
-            assert len(duplex) <= 4, duplex.keys()
-            pool.compute(duplex, barcode)
-            stats['duplexes'] += 1
-            duplex = collections.OrderedDict()
-          barcode = this_barcode
-          order = this_order
-          mate = this_mate
-          family = []
-        read = {'name': name, 'seq':seq, 'qual':qual}
-        family.append(read)
-        total_reads += 1
-      # Process the last family.
-      if order is not None and mate is not None:
-        duplex[(order, mate)] = family
-      assert len(duplex) <= 4, duplex.keys()
-      pool.compute(duplex, barcode)
-      stats['duplexes'] += 1
-
-      # Retrieve the remaining results.
-      logging.info('Flushing remaining results from worker processes..')
-      pool.flush()
-
+      process_families(args.infile, pool, stats)
     finally:
       # If the root process encounters an exception and doesn't tell the workers to stop, it will
       # hang forever.
@@ -271,7 +223,7 @@ def main(argv):
     run_time = int(time.time() - start_time)
     max_mem = get_max_mem()
     logging.info('Processed {} reads and {} duplexes in {} seconds.'
-                 .format(total_reads, stats['runs'], run_time))
+                 .format(stats['total_reads'], stats['runs'], run_time))
     if stats['reads'] > 0 and stats['runs'] > 0:
       per_read = stats['time'] / stats['reads']
       per_run = stats['time'] / stats['runs']
@@ -306,6 +258,57 @@ def main(argv):
   if args.phone_home and call:
     run_data = get_run_data(stats, pool, max_mem)
     call.send_data('end', run_time=run_time, run_data=run_data)
+
+
+def process_families(infile, pool, stats):
+  total_reads = 0
+  duplex = collections.OrderedDict()
+  family = []
+  barcode = None
+  order = None
+  # Note: mate is a 0-indexed integer ("mate 1" from the input file is mate 0 here).
+  mate = None
+  for line in infile:
+    # Allow comments (e.g. for test input files).
+    if line.startswith('#'):
+      continue
+    fields = line.rstrip('\r\n').split('\t')
+    if len(fields) != 6:
+      continue
+    this_barcode, this_order, this_mate_str, name, seq, qual = fields
+    this_mate = int(this_mate_str)-1
+    # If the barcode, order, and mate are the same, we're just continuing the add reads to the
+    # current family. Otherwise, store the current family, start a new one, and process the
+    # duplex if we're at the end of one.
+    new_barcode = this_barcode != barcode
+    new_order = this_order != order
+    new_mate = this_mate != mate
+    if new_barcode or new_order or new_mate:
+      if order is not None and mate is not None:
+        duplex[(order, mate)] = family
+      # If the barcode changed, process the last duplex and start a new one.
+      if new_barcode and barcode is not None:
+        assert len(duplex) <= 4, duplex.keys()
+        pool.compute(duplex, barcode)
+        stats['duplexes'] += 1
+        duplex = collections.OrderedDict()
+      barcode = this_barcode
+      order = this_order
+      mate = this_mate
+      family = []
+    read = {'name': name, 'seq':seq, 'qual':qual}
+    family.append(read)
+    total_reads += 1
+  # Process the last family.
+  if order is not None and mate is not None:
+    duplex[(order, mate)] = family
+  assert len(duplex) <= 4, duplex.keys()
+  pool.compute(duplex, barcode)
+  stats['duplexes'] += 1
+  stats['total_reads'] = total_reads
+  # Retrieve the remaining results.
+  logging.info('Flushing remaining results from worker processes..')
+  pool.flush()
 
 
 def get_max_mem():
