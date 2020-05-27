@@ -60,8 +60,8 @@ def make_argparser():
               'as there are CPU cores. Default: %(default)s.'))
   parser.add_argument('--queue-size', type=int,
     help=wrap('How long to go accumulating responses from worker subprocesses before dealing '
-              'with all of them. Default: {} * the number of worker --processes.'
-              .format(parallel_tools.QUEUE_SIZE_MULTIPLIER)))
+              f'with all of them. Default: {parallel_tools.QUEUE_SIZE_MULTIPLIER} * the number of '
+              'worker --processes.'))
   parser.add_argument('--phone-home', action='store_true',
     help=wrap('Report helpful usage data to the developer, to better understand the use cases and '
               'performance of the tool. The only data which will be recorded is the name and '
@@ -126,80 +126,14 @@ def main(argv):
 
     # Open a pool of worker processes.
     stats = {'duplexes':0, 'time':0, 'pairs':0, 'runs':0, 'failures':0, 'aligned_pairs':0}
-    pool = parallel_tools.SyncAsyncPool(process_duplex,
-                                        processes=args.processes,
-                                        static_kwargs={'aligner':args.aligner},
-                                        queue_size=args.queue_size,
-                                        callback=process_result,
-                                        callback_args=[stats],
-                                       )
-    """Now the main loop.
-    This processes whole duplexes (pairs of strands) at a time for a future option to align the
-    whole duplex at a time.
-    duplex data structure:
-    duplex = {
-      'ab': [
-        {'name1': 'read_name1a',
-         'seq1':  'GATT-ACA',
-         'qual1': 'sc!0 /J*',
-         'name2': 'read_name1b',
-         'seq2':  'ACTGACTA',
-         'qual2': '34I&SDF)'
-        },
-        {'name1': 'read_name2a',
-         ...
-        },
-        ...
-      ],
-      'ba': [
-        ...
-      ]
-    }
-    e.g.:
-    seq = duplex[order][pair_num]['seq1']"""
+    pool = parallel_tools.SyncAsyncPool(
+      process_duplex, processes=args.processes, static_kwargs={'aligner':args.aligner},
+      queue_size=args.queue_size, callback=process_result, callback_args=[stats]
+    )
 
     try:
-      duplex = collections.OrderedDict()
-      family = []
-      barcode = None
-      order = None
-      for line in args.infile:
-        fields = line.rstrip('\r\n').split('\t')
-        if len(fields) != 8:
-          continue
-        (this_barcode, this_order, name1, seq1, qual1, name2, seq2, qual2) = fields
-        if args.check_ids:
-          assert_read_ids_match(name1, name2)
-        # If the barcode or order has changed, we're in a new family.
-        # Process the reads we've previously gathered as one family and start a new family.
-        if this_barcode != barcode or this_order != order:
-          duplex[order] = family
-          # If the barcode is different, we're at the end of the whole duplex. Process the it and start
-          # a new one. If the barcode is the same, we're in the same duplex, but we've switched strands.
-          if this_barcode != barcode:
-            # logging.debug('processing {}: {} orders ({})'.format(barcode, len(duplex),
-            #               '/'.join([str(len(duplex[o])) for o in duplex])))
-            if barcode is not None:
-              pool.compute(duplex, barcode)
-              stats['duplexes'] += 1
-            duplex = collections.OrderedDict()
-          barcode = this_barcode
-          order = this_order
-          family = []
-        pair = {'name1': name1, 'seq1':seq1, 'qual1':qual1, 'name2':name2, 'seq2':seq2, 'qual2':qual2}
-        family.append(pair)
-        stats['pairs'] += 1
-      # Process the last family.
-      duplex[order] = family
-      # logging.debug('processing {}: {} orders ({}) [last]'.format(barcode, len(duplex),
-      #               '/'.join([str(len(duplex[o])) for o in duplex])))
-      pool.compute(duplex, barcode)
-      stats['duplexes'] += 1
-
-      # Retrieve the remaining results.
-      logging.info('Flushing remaining results from worker processes..')
-      pool.flush()
-
+      # The main loop.
+      align_families(args.infile, pool, stats, check_ids=args.check_ids)
     finally:
       # If an exception occurs in the parent without stopping the child processes, this will hang.
       # Make sure to kill the children in all cases.
@@ -212,13 +146,15 @@ def main(argv):
     # Final stats on the run.
     run_time = int(time.time() - start_time)
     max_mem = get_max_mem()
-    logging.error('Processed {pairs} read pairs in {duplexes} duplexes, with {failures} alignment '
-                  'failures.'.format(**stats))
+    logging.error(
+      'Processed {pairs} read pairs in {duplexes} duplexes, with {failures} alignment failures.'
+      .format(**stats)
+    )
     if stats['aligned_pairs'] > 0 and stats['runs'] > 0:
       per_pair = stats['time'] / stats['aligned_pairs']
       per_run = stats['time'] / stats['runs']
-      logging.error('{:0.3f}s per pair, {:0.3f}s per run.'.format(per_pair, per_run))
-    logging.error('in {}s total time and {:0.2f}MB RAM.'.format(run_time, max_mem))
+      logging.error(f'{per_pair:0.3f}s per pair, {per_run:0.3f}s per run.')
+    logging.error(f'in {run_time}s total time and {max_mem:0.2f}MB RAM.')
 
   except (Exception, KeyboardInterrupt) as exception:
     if args.phone_home and call:
@@ -269,6 +205,72 @@ def get_run_data(stats, pool, aligner, max_mem=None):
   return run_data
 
 
+def align_families(infile, pool, stats, check_ids=True):
+  """The main loop.
+  This processes whole duplexes (pairs of strands) at a time for a future option to align the
+  whole duplex at a time.
+  duplex data structure:
+  duplex = {
+    'ab': [
+      {'name1': 'read_name1a',
+        'seq1':  'GATT-ACA',
+        'qual1': 'sc!0 /J*',
+        'name2': 'read_name1b',
+        'seq2':  'ACTGACTA',
+        'qual2': '34I&SDF)'
+      },
+      {'name1': 'read_name2a',
+        ...
+      },
+      ...
+    ],
+    'ba': [
+      ...
+    ]
+  }
+  e.g.:
+  seq = duplex[order][pair_num]['seq1']"""
+  duplex = collections.OrderedDict()
+  family = []
+  barcode = None
+  order = None
+  for line in infile:
+    fields = line.rstrip('\r\n').split('\t')
+    if len(fields) != 8:
+      continue
+    (this_barcode, this_order, name1, seq1, qual1, name2, seq2, qual2) = fields
+    if check_ids:
+      assert_read_ids_match(name1, name2)
+    # If the barcode or order has changed, we're in a new family.
+    # Process the reads we've previously gathered as one family and start a new family.
+    if this_barcode != barcode or this_order != order:
+      duplex[order] = family
+      # If the barcode is different, we're at the end of the whole duplex. Process the it and start
+      # a new one. If the barcode is the same, we're in the same duplex, but we've switched strands.
+      if this_barcode != barcode:
+        # orders_str = '/'.join([str(len(duplex[o])) for o in duplex]
+        # logging.debug(f'processing {barcode}: {len(duplex)} orders ({orders_str})'
+        if barcode is not None:
+          pool.compute(duplex, barcode)
+          stats['duplexes'] += 1
+        duplex = collections.OrderedDict()
+      barcode = this_barcode
+      order = this_order
+      family = []
+    pair = {'name1': name1, 'seq1':seq1, 'qual1':qual1, 'name2':name2, 'seq2':seq2, 'qual2':qual2}
+    family.append(pair)
+    stats['pairs'] += 1
+  # Process the last family.
+  duplex[order] = family
+  # orders_str = '/'.join([str(len(duplex[o])) for o in duplex]
+  # logging.debug(f'processing {barcode}: {len(duplex)} orders ({orders_str})'
+  pool.compute(duplex, barcode)
+  stats['duplexes'] += 1
+  # Retrieve the remaining results.
+  logging.info('Flushing remaining results from worker processes..')
+  pool.flush()
+
+
 def assert_read_ids_match(name1, name2):
   id1 = name1.split()[0]
   id2 = name2.split()[0]
@@ -279,19 +281,22 @@ def assert_read_ids_match(name1, name2):
   if id1 == id2:
     return True
   elif id1.endswith('/2') and id2.endswith('/1'):
-    raise ValueError('Read names not as expected. Mate 1 ends with /2 and mate 2 ends with /1:\n'
-                     '  Mate 1: {!r}\n  Mate 2: {!r}'.format(name1, name2))
+    raise ValueError(
+      f'Read names not as expected. Mate 1 ends with /2 and mate 2 ends with /1:\n'
+      f'  Mate 1: {name1!r}\n  Mate 2: {name2!r}'
+    )
   else:
-    raise ValueError('Read names "{}" and "{}" do not match.'.format(name1, name2))
+    raise ValueError(f'Read names {name1!r} and {name2!r} do not match.')
 
 
 def process_duplex(duplex, barcode, aligner='mafft'):
   output = ''
-  logging.debug('Starting {} (orders "{}")'.format(barcode, '", "'.join(map(str, duplex.keys()))))
+  orders_str = '", "'.join(map(str, duplex.keys()))
+  logging.debug(f'Starting {barcode} (orders "{orders_str}")')
   run_stats = {'time':0, 'runs':0, 'aligned_pairs':0, 'failures':0}
   orders = tuple(duplex.keys())
   if len(duplex) == 0 or None in duplex:
-    logging.warning('Empty duplex {}.'.format(barcode))
+    logging.warning(f'Empty duplex {barcode}.')
     return '', {}
   elif len(duplex) == 1:
     # If there's only one strand in the duplex, just process the first mate, then the second.
@@ -301,29 +306,30 @@ def process_duplex(duplex, barcode, aligner='mafft'):
     # strand1/mate1, strand2/mate2, strand1/mate2, strand2/mate1
     combos = ((1, orders[0]), (2, orders[1]), (2, orders[0]), (1, orders[1]))
   else:
-    raise AssertionError('More than 2 orders in duplex {}: {}'.format(barcode, orders))
+    raise AssertionError(f'More than 2 orders in duplex {barcode}: {orders}')
   for mate, order in combos:
     family = duplex[order]
     start = time.time()
     try:
       alignment = align_family(family, mate, aligner=aligner)
     except AssertionError as error:
-      logging.exception('While processing duplex {}, order {}, mate {}:'.format(barcode, order, mate))
+      logging.exception(f'While processing duplex {barcode}, order {order}, mate {mate}:')
       raise
     except (OSError, subprocess.CalledProcessError) as error:
-      logging.warning('{} on family {}, order {}, mate {}:\n{}'
-                      .format(type(error).__name__, barcode, order, mate, error))
+      logging.warning(
+        f'{type(error).__name__} on family {barcode}, order {order}, mate {mate}:\n{error}'
+      )
       alignment = None
     # Compile statistics.
     elapsed = time.time() - start
     pairs = len(family)
-    logging.debug('{} sec for {} read pairs.'.format(elapsed, pairs))
+    logging.debug(f'{elapsed} sec for {pairs} read pairs.')
     if pairs > 1:
       run_stats['time'] += elapsed
       run_stats['runs'] += 1
       run_stats['aligned_pairs'] += pairs
     if alignment is None:
-      logging.warning('Error aligning family {}/{} (read {}).'.format(barcode, order, mate))
+      logging.warning(f'Error aligning family {barcode}/{order} (read {mate}).')
       run_stats['failures'] += 1
     else:
       output += format_msa(alignment, barcode, order, mate)
@@ -424,9 +430,8 @@ def read_fasta(fasta):
 
 def format_msa(align, barcode, order, mate, outfile=sys.stdout):
   output = ''
-  for sequence in align:
-    output += '{bar}\t{order}\t{mate}\t{name}\t{seq}\t{qual}\n'.format(bar=barcode, order=order,
-                                                                       mate=mate, **sequence)
+  for seq in align:
+    output += f'{barcode}\t{order}\t{mate}\t{seq["name"]}\t{seq["seq"]}\t{seq["qual"]}\n'
   return output
 
 
