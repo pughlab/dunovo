@@ -4,12 +4,12 @@ This is a pipeline for processing duplex sequencing data without the use of a re
 
 The pipeline was designed for use with the duplex method described in [Kennedy *et al.* 2014](https://dx.doi.org/10.1038/nprot.2014.170), but the assumptions are relatively minimal, so you should be able to apply it to variants of the protocol.
 
-Du Novo 2.0 is released under the GPLv2 license, except for some portions governed by the MIT license. Earlier versions were released under the BSD license. See `LICENSE.txt` for details.
+Du Novo 2.0 is released under the AFL license, but includes code licensed under the MIT and GPLv2 licenses. See [`LICENSE.txt`](LICENSE.txt) for details.
 
-The first version of Du Novo was [published](https://doi.org/10.1186/s13059-016-1039-4) in Genome Biology in 2016. You can cite it as:
+The latest [published](https://doi.org/10.1186/s12859-020-3419-8) version of Du Novo can be cited as:
 ````
-Stoler N, Arbeithuber B, Guiblet W, Makova KD, Nekrutenko A. 2016.
-Streamlined analysis of duplex sequencing data with Du Novo. Genome Biol 17: 180.
+Stoler N, Arbeithuber B, Povysil G, Heinzl M, Salazar R, Makova KD, Tiemann-Boege I, Nekrutenko A. 2020.
+Family reunion via error correction: an efficient analysis of duplex sequencing data. BMC Bioinformatics 21, 96.
 ````
 
 
