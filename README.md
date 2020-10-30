@@ -25,7 +25,7 @@ We created a comprehensive [tutorial](https://github.com/galaxyproject/dunovo/wi
 
 #### Required
 
-The pipeline requires a Unix operating system and Python version 2.7. Linux is recommended. OS X and BSD may work, but are untested.
+The pipeline requires a Unix operating system and Python version 3. Linux is recommended. OS X and BSD may work, but are untested.
 
 It also requires several standard Unix tools. Version numbers in parentheses are what the software was tested with, but other versions likely work. These must be available on your [`$PATH`](https://en.wikipedia.org/wiki/Search_path):  
  -  [`gcc`](https://gcc.gnu.org/) (4.8.4)
