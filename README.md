@@ -82,14 +82,14 @@ The `make` command is needed to compile the C modules and kalign. You need to be
 
 To check for obvious problems with the installation, you can run:
 
-    $ tests/run.sh active
+    $ tests/run.sh core
 
 Successful results should look like
 
             [script] ::: [input file]:
     Files [test output] and [expected output] are identical
 
-This won't catch every installation problem, but it should check that the basics are working. If you see errors in unit tests, those may be in an ancillary script that won't affect your usage of Du Novo.
+Anything else is a failure. This won't catch every installation problem, but it should check that the basics are working.
 
 
 ### Usage

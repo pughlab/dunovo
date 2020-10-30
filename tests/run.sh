@@ -6,8 +6,13 @@ fi
 # get the name of the test directory
 dirname=$(dirname $0)
 
-USAGE="Usage: \$ $(basename $0) [options] [test1 [test2]]"
 cmd_prefix="$dirname/../"
+Usage="Usage: \$ $(basename $0) [options] [test1 [test2]]
+Options:
+-p: Assume script executables are on your \$PATH.
+    E.g. execute make-consensi.py instead of ${cmd_prefix}make-consensi.py.
+-q: Quiet mode.
+-v: Verbose mode."
 
 function main {
 
@@ -20,15 +25,7 @@ function main {
     if [[ ${arg:0:1} == '-' ]]; then
       case "$arg" in
         -h)
-          echo "$USAGE" >&2
-          echo "Meta tests:" >&2
-          list_meta_tests >&2
-          echo "Active tests:" >&2
-          list_active_tests >&2
-          echo "Inactive tests:" >&2
-          list_inactive_tests >&2
-          echo "Unit tests:" >&2
-          echo "  unit" >&2
+          print_usage >&2
           exit 1;;
         -p)
           cmd_prefix=;;
@@ -60,64 +57,92 @@ function main {
   fi
 }
 
+function print_usage {
+  echo "$Usage"
+  echo "Meta tests:"
+  list_meta_tests | indent
+  echo "Active tests:"
+  list_active_tests | indent
+  echo "Inactive tests:"
+  list_inactive_tests | indent
+  echo "Core tests:"
+  list_core_tests | indent
+  echo "Unit tests:"
+  echo "  unit"
+}
+
 function fail {
   echo "$@" >&2
   exit 1
 }
 
-function list_active_tests {
-  while read declare f test; do
-    if echo "$initial_declarations_plus_meta" | grep -qE "^declare -f $test\$"; then
+function indent {
+  awk '{print "  " $0}'
+}
+
+function list_functions {
+  declare -F | awk 'substr($3,1,1) != "_" {print $3}'
+}
+
+function list_base_tests {
+  # Print a list of all tests, excluding meta tests.
+  list_functions | while read function; do
+    if ! printf '%s\n' "$initial_functions_plus_meta" | grep -qxF "$function"; then
       # Filter out regular functions and meta tests.
-      continue
-    elif echo "$test" | grep -qE '^_'; then
-      # Filter out functions starting with an underscore.
-      continue
-    elif ! echo "$all_declarations_minus_inactive" | grep -qE "^declare -f $test\$"; then
-      # Filter out inactive tests.
-      continue
-    else
-      echo "  $test"
+      printf '%s\n' "$function"
     fi
-  done < <(declare -F)
+  done
+}
+
+function list_active_tests {
+  list_base_tests | while read function; do
+    if printf '%s\n' "$all_functions_minus_inactive" | grep -qxF "$function"; then
+      printf '%s\n' "$function"
+    fi
+  done
 }
 
 function list_inactive_tests {
-  while read declare f test; do
-    if echo "$all_declarations_minus_inactive" | grep -qE "^declare -f $test\$"; then
-      # Filter out regular functions, meta tests, and active tests.
-      continue
-    elif echo "$test" | grep -qE '^_'; then
-      # Filter out functions starting with an underscore.
-      continue
-    else
-      echo "  $test"
+  list_base_tests | while read function; do
+    if ! printf '%s\n' "$all_functions_minus_inactive" | grep -qxF "$function"; then
+      printf '%s\n' "$function"
     fi
-  done < <(declare -F)
+  done
+}
+
+function list_core_tests {
+  list_base_tests | while read function; do
+    # Get functions up to and including the core ones.
+    if printf '%s\n' "$all_functions_up_to_core" | grep -qxF "$function"; then
+      # Get functions after the meta ones.
+      if ! printf '%s\n' "$initial_functions_plus_meta" | grep -qxF "$function"; then
+        printf '%s\n' "$function"
+      fi
+    fi
+  done
 }
 
 function list_meta_tests {
   # Want to list these tests in this order (as long as they exist).
-  for test in all active inactive; do
-    if declare -F | grep -qE "^declare -f $test\$"; then
-      echo "  $test"
+  for test in all active inactive core; do
+    if list_functions | grep -qxF "$test"; then
+      printf '%s\n' "$test"
     fi
   done
   # Then programmatically list the rest.
-  while read declare f test; do
-    if echo "$initial_declarations" | grep -qE "^declare -f $test\$"; then
-      # Filter out regular functions.
-      continue
-    elif echo -e "all\nactive\ninactive" | grep -qE "^$test\$"; then
-      # Filter out the fixed-order ones we already listed.
-      continue
-    elif echo "$initial_declarations_plus_meta" | grep -qE "^declare -f $test\$"; then
-      # If it matches this list but not the last, it's a meta test.
-      echo "  $test"
+  list_functions | while read function; do
+    # Select only actual tests.
+    if ! printf '%s\n' "$initial_functions" | grep -qxF "$function"; then
+      # Select only meta tests.
+      if printf '%s\n' "$initial_functions_plus_meta" | grep -qxF "$function"; then
+        # But filter out the fixed-order ones we already listed.
+        if ! printf 'all\nactive\ninactive\ncore\n' | grep -qxF "$function"; then
+          printf '%s\n' "$function"
+        fi
+      fi
     fi
-  done < <(declare -F)
+  done
 }
-
 
 function unit {
   unit_tests
@@ -130,7 +155,7 @@ function unit_tests {
 
 # Capture a list of all functions defined before the tests, to tell which are actual functions
 # and which are tests.
-initial_declarations=$(declare -F)
+initial_functions=$(list_functions)
 
 
 ########## Meta tests ##########
@@ -150,6 +175,12 @@ function active {
 
 function inactive {
   for test in $(list_inactive_tests); do
+    $test
+  done
+}
+
+function core {
+  for test in $(list_core_tests); do
     $test
   done
 }
@@ -183,7 +214,7 @@ function consensi_all {
 }
 
 # Get the list of functions now that the meta tests have been declared.
-initial_declarations_plus_meta=$(declare -F)
+initial_functions_plus_meta=$(list_functions)
 
 
 ########## Functional tests ##########
@@ -306,12 +337,9 @@ function correct {
     | diff -s "$dirname/correct.families.corrected.tsv" -
 }
 
-function stats_diffs {
-  echo -e "\t${FUNCNAME[0]}:\tstats.py diffs ::: gaps.msa.tsv:"
-  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/stats.py); then return 1; fi
-  "${local_prefix}stats.py" diffs "$dirname/gaps.msa.tsv" \
-    | diff -s - "$dirname/gaps-diffs.out.tsv"
-}
+
+# Only the tests above are for the "core" pipeline scripts.
+all_functions_up_to_core=$(list_functions)
 
 
 function precheck {
@@ -319,6 +347,13 @@ function precheck {
   if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/precheck.py); then return 1; fi
   "${local_prefix}precheck.py" "$dirname/families.raw_1.fq" "$dirname/families.raw_2.fq" \
     | diff -s - "$dirname/families.precheck.tsv"
+}
+
+function stats_diffs {
+  echo -e "\t${FUNCNAME[0]}:\tstats.py diffs ::: gaps.msa.tsv:"
+  if ! local_prefix=$(_get_local_prefix "$cmd_prefix" utils/stats.py); then return 1; fi
+  "${local_prefix}stats.py" diffs "$dirname/gaps.msa.tsv" \
+    | diff -s - "$dirname/gaps-diffs.out.tsv"
 }
 
 
@@ -379,7 +414,7 @@ function errstats_indels {
 
 
 # All tests below here are considered inactive.
-all_declarations_minus_inactive=$(declare -F)
+all_functions_minus_inactive=$(list_functions)
 
 function errstats_overlap {
   # Note: Currently, the correct PYBAMPATH is ~/bx/code/indels/pyBamParser/hg/lib.
