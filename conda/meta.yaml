@@ -1,4 +1,4 @@
-{% set version = "2.15" %}
+{% set version = "2.16" %}
 
 package:
   name: dunovo
@@ -26,6 +26,7 @@ requirements:
     - mafft 7.221
     - bowtie >=1.1.2
     - networkx <2.0
+    - samtools 1.9
     - paste
     - gawk
 
