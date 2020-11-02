@@ -1,26 +1,41 @@
-#!/usr/bin/env python
-from __future__ import division
-import sys
-import random
+#!/usr/bin/env python3
 import argparse
+import logging
+import random
+import sys
 
-OPT_DEFAULTS = {'fraction':0.1, 'seed':1}
 USAGE = "%(prog)s [options]"
 DESCRIPTION = """"""
 
-def main(argv):
 
-  parser = argparse.ArgumentParser(description=DESCRIPTION)
-  parser.set_defaults(**OPT_DEFAULTS)
-
+def make_argparser():
+  parser = argparse.ArgumentParser(add_help=False, description=DESCRIPTION)
+  options = parser.add_argument_group('Options')
   parser.add_argument('infile', metavar='read-families.tsv', nargs='?',
     help='The input reads, sorted into families.')
-  parser.add_argument('-f', '--fraction', type=float,
+  parser.add_argument('-f', '--fraction', type=float, default=0.1,
     help='Fraction of families to output. Default: %(default)s')
-  parser.add_argument('-s', '--seed', type=int,
+  parser.add_argument('-s', '--seed', type=int, default=1,
     help='Random number generator seed. Default: %(default)s')
+  options.add_argument('-h', '--help', action='help',
+    help='Print this argument help text and exit.')
+  logs = parser.add_argument_group('Logging')
+  logs.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
+    help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
+  volume = logs.add_mutually_exclusive_group()
+  volume.add_argument('-q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
+    default=logging.WARNING)
+  volume.add_argument('-v', '--verbose', dest='volume', action='store_const', const=logging.INFO)
+  volume.add_argument('-D', '--debug', dest='volume', action='store_const', const=logging.DEBUG)
+  return parser
 
+
+def main(argv):
+
+  parser = make_argparser()
   args = parser.parse_args(argv[1:])
+
+  logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
   random.seed(args.seed)
 
@@ -50,8 +65,15 @@ def main(argv):
 
 
 def fail(message):
-  sys.stderr.write(message+"\n")
-  sys.exit(1)
+  logging.critical('Error: '+str(message))
+  if __name__ == '__main__':
+    sys.exit(1)
+  else:
+    raise Exception(message)
+
 
 if __name__ == '__main__':
-  sys.exit(main(sys.argv))
+  try:
+    sys.exit(main(sys.argv))
+  except BrokenPipeError:
+    pass
