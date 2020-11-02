@@ -42,6 +42,8 @@ def main(argv):
       family = []
     family.append(line)
     last_barcode = barcode
+  if random.random() <= args.fraction:
+    sys.stdout.write(''.join(family))
 
   if infile is not sys.stdin:
     infile.close()
