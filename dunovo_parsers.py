@@ -27,7 +27,7 @@ def parse_make_families(lines, prepended=False):
         # If it's the output of correct.py with --prepend, there's an extra column.
         # We want the corrected barcode (column 1), not the original one (column 2).
         if prepended:
-            del fields[1]
+            fields[2:4] = []
         barcode, order = fields[:2]
         if barcode != last_barcode or order != last_order:
             if last_order is not None:
