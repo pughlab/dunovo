@@ -20,9 +20,13 @@ def parse_make_families(lines, prepended=False):
     strand_families = []
     strand_family_lines = []
     last_barcode = last_order = None
+    if prepended:
+        expected_columns = 10
+    else:
+        expected_columns = 8
     for line_num, line in enumerate(lines, 1):
         fields = line.rstrip('\r\n').split('\t')
-        if len(fields) != 8:
+        if len(fields) != expected_columns:
             raise DunovoFormatError(f'Line {line_num} has an invalid number of columns: {len(fields)}')
         # If it's the output of correct.py with --prepend, there's an extra column.
         # We want the corrected barcode (column 1), not the original one (column 2).
