@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import pathlib
 import random
 import sys
+script_dir = pathlib.Path(__file__).resolve().parent
+root_dir = script_dir.parent
+sys.path.append(str(root_dir))
+import dunovo_parsers
+from bfx import getreads
 
 USAGE = "%(prog)s [options]"
 DESCRIPTION = """"""
@@ -11,12 +17,24 @@ DESCRIPTION = """"""
 def make_argparser():
   parser = argparse.ArgumentParser(add_help=False, description=DESCRIPTION)
   options = parser.add_argument_group('Options')
-  parser.add_argument('infile', metavar='read-families.tsv', nargs='?',
-    help='The input reads, sorted into families.')
-  parser.add_argument('-f', '--fraction', type=float, default=0.1,
+  parser.add_argument('families', metavar='families.tsv', type=argparse.FileType('r'),
+    help='The input reads, sorted into families (the output of make-families.sh).')
+  parser.add_argument('fastq1', metavar='reads_1.fq', type=argparse.FileType('r'),
+    help='The raw input reads (mate 1).')
+  parser.add_argument('fastq2', metavar='reads_2.fq', type=argparse.FileType('r'),
+    help='The raw input reads (mate 2).')
+  parser.add_argument('fastq1_out', metavar='selected_reads_1.fq', type=argparse.FileType('w'),
+    help='Output filename for the subsampled reads (mate 1). '
+      'Warning: any existing file will be overwritten.')
+  parser.add_argument('fastq2_out', metavar='selected_reads_2.fq', type=argparse.FileType('w'),
+    help='Output filename for the subsampled reads (mate 2). '
+      'Warning: any existing file will be overwritten.')
+  parser.add_argument('-f', '--fraction', type=float, default=1,
     help='Fraction of families to output. Default: %(default)s')
-  parser.add_argument('-s', '--seed', type=int, default=1,
+  parser.add_argument('-s', '--seed', type=int,
     help='Random number generator seed. Default: %(default)s')
+  parser.add_argument('-P', '--prepended', action='store_true',
+    help='The families.tsv file is the result of correct.py --prepend.')
   options.add_argument('-h', '--help', action='help',
     help='Print this argument help text and exit.')
   logs = parser.add_argument_group('Logging')
@@ -37,31 +55,69 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
-  random.seed(args.seed)
-
-  if args.infile:
-    infile = open(args.infile)
+  if args.seed is None:
+    seed = random.randint(1, 2**32)
+    logging.error(f'Seed: {seed}')
   else:
-    infile = sys.stdin
+    seed = args.seed
+  random.seed(seed)
 
-  family = []
-  last_barcode = None
-  for line in infile:
-    fields = line.rstrip('\r\n').split('\t')
-    if not fields:
-      continue
-    barcode = fields[0]
-    if barcode != last_barcode:
-      if random.random() <= args.fraction:
-        sys.stdout.write(''.join(family))
-      family = []
-    family.append(line)
-    last_barcode = barcode
-  if random.random() <= args.fraction:
-    sys.stdout.write(''.join(family))
+  families = dunovo_parsers.parse_make_families(args.families, args.prepended)
+  chosen_families = choose_elements(families, args.fraction)
+  mate1_names, mate2_names = get_all_read_names(chosen_families, args.fraction)
+  find_and_write_chosen_reads(mate1_names, args.fastq1, args.fastq1_out)
+  find_and_write_chosen_reads(mate2_names, args.fastq2, args.fastq2_out)
 
-  if infile is not sys.stdin:
-    infile.close()
+
+def choose_elements(elements, fraction):
+  for element in elements:
+    if random.random() <= fraction:
+      yield element
+
+
+def get_all_read_names(families, fraction):
+  all_mate1_names = set()
+  all_mate2_names = set()
+  for family in families:
+    mate1_names, mate2_names = get_read_names(family)
+    all_mate1_names.update(mate1_names)
+    all_mate2_names.update(mate2_names)
+  return all_mate1_names, all_mate2_names
+
+
+def get_read_names(family):
+  mate1_names = []
+  mate2_names = []
+  for strand_family in family.ab, family.ba:
+    mate1s = strand_family.mate1.reads
+    mate1_names.extend([read.name for read in mate1s])
+    mate2s = strand_family.mate2.reads
+    mate2_names.extend([read.name for read in mate2s])
+  return mate1_names, mate2_names
+
+
+def find_and_write_chosen_reads(chosen_names, input_fastq, output_fastq):
+  input_reads = getreads.getparser(input_fastq, filetype='fastq')
+  chosen_reads = find_chosen_reads(input_reads, chosen_names)
+  write_reads(chosen_reads, output_fastq)
+
+
+def find_chosen_reads(input_reads, read_names):
+  for read in input_reads:
+    if read.name in read_names:
+      yield read
+
+
+def write_reads(reads, outfile):
+  for read in reads:
+    print(format_read(read), file=outfile)
+
+
+def format_read(read):
+  return f"""@{read.name}
+{read.seq}
++
+{read.qual}"""
 
 
 def fail(message):
