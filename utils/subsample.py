@@ -62,10 +62,13 @@ def main(argv):
     seed = args.seed
   random.seed(seed)
 
+  logging.info('Info: Reading input families file..')
   families = dunovo_parsers.parse_make_families(args.families, args.prepended)
   chosen_families = choose_elements(families, args.fraction)
   mate1_names, mate2_names = get_all_read_names(chosen_families, args.fraction)
+  logging.info('Info: Filtering raw FASTQ into subsampled FASTQ (mate 1)..')
   find_and_write_chosen_reads(mate1_names, args.fastq1, args.fastq1_out)
+  logging.info('Info: Filtering raw FASTQ into subsampled FASTQ (mate 2)..')
   find_and_write_chosen_reads(mate2_names, args.fastq2, args.fastq2_out)
 
 
