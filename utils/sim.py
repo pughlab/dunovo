@@ -144,7 +144,7 @@ def main(argv):
   if isinstance(args.fastq_qual, numbers.Integral):
     assert args.fastq_qual >= 0, '--fastq-qual cannot be negative.'
     fastq_qual = chr(args.fastq_qual + 33)
-  elif isinstance(args.fastq_qual, basestring):
+  elif isinstance(args.fastq_qual, str):
     assert len(args.fastq_qual) == 1, '--fastq-qual cannot be more than a single character.'
     fastq_qual = args.fastq_qual
   else:
