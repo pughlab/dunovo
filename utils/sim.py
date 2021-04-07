@@ -13,6 +13,7 @@ import numbers
 import tempfile
 import argparse
 import subprocess
+import random
 script_path = os.path.realpath(__file__)
 root_dir = os.path.dirname(os.path.dirname(script_path))
 sys.path.insert(0, root_dir)
@@ -95,6 +96,8 @@ def make_argparser():
     help='Probability an indel is extended. Default: %(default)s')
   params.add_argument('-B', '--bar-len', type=int, default=12,
     help='Length of the barcodes to generate. Default: %(default)s')
+  io.add_argument('-L', '--bar-list', nargs='?',
+    help='Provide a list of barcodes to use (chosen randomly from list rather than generating them).')
   params.add_argument('-I', '--invariant', default='TGACT',
     help='The invariant linker sequence between the barcode and sample sequence in each read. '
          'Default: %(default)s')
@@ -121,6 +124,13 @@ def main(argv):
   if not (args.ref or args.frag_file):
     parser.print_usage()
     fail('You must provide either a reference or fragments file.')
+  if args.bar_list:
+    print(type(args.bar_list))
+    f = open(str(args.bar_list), "r")
+    barlist = f.read()
+    barcodes = list(map(str, barlist.split()))
+    if not os.path.isfile(args.bar_list):
+      fail('Error: barcode list file not found.'.format(args.bar_list))
   if args.ref:
     if not os.path.isfile(args.ref):
       fail('Error: reference file {!r} not found.'.format(args.ref))
@@ -150,7 +160,7 @@ def main(argv):
   else:
     raise AssertionError('--fastq-qual must be a positive integer or single character.')
   qual_line = fastq_qual * args.read_len
-
+  
   invariant_rc = pcr.get_revcomp(args.invariant)
 
   # Create a temporary directory to do our work in. Then work inside a try so we can finally remove
@@ -181,9 +191,15 @@ def main(argv):
       if n_frags > args.n_frags:
         break
       chrom, id_num, start, stop = parse_read_id(raw_fragment.id)
-      barcode1 = pcr.get_rand_seq(args.bar_len)
-      barcode2 = pcr.get_rand_seq(args.bar_len)
-      barcode2_rc = pcr.get_revcomp(barcode2)
+      
+      if args.bar_list:
+        barcode1 = random.choice(barcodes)
+        barcode2 = random.choice(barcodes)
+        barcode2_rc = pcr.get_revcomp(barcode2)
+      else:  
+        barcode1 = pcr.get_rand_seq(args.bar_len)
+        barcode2 = pcr.get_rand_seq(args.bar_len)
+        barcode2_rc = pcr.get_revcomp(barcode2)
       #TODO: Vary the size of the fragment.
       #      Could add ~100bp to frag_len arg to wgsim, then randomly select a subsequence here.
       raw_frag_full = barcode1 + args.invariant + raw_fragment.seq + invariant_rc + barcode2
@@ -245,6 +261,7 @@ def main(argv):
           reads1.write('>{}\n{}\n'.format(read_id, read1_seq))
           reads2.write('>{}\n{}\n'.format(read_id, read2_seq))
         elif args.out_format == 'fastq':
+          qual_line = fastq_qual * len(read1_seq) ## calculating qual line based on actual read length in case fragment length is less than read length
           reads1.write('@{}\n{}\n+\n{}\n'.format(read_id, read1_seq, qual_line))
           reads2.write('@{}\n{}\n+\n{}\n'.format(read_id, read2_seq, qual_line))
 
